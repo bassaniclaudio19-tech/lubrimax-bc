@@ -196,7 +196,41 @@ select:disabled{opacity:.5}
 .sug{padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);display:flex;align-items:center;gap:9px}
 .sug:last-child{border-bottom:none}
 .sug:hover{background:var(--panel)}
-@media(max-width:760px){ .picker-grid{grid-template-columns:1fr} .picker-list{height:200px} }
+/* ---- COMPRAS ---- */
+.cmp-head{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.cmp-head .field{margin:0}
+.cmp-toggle{display:flex;gap:0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.cmp-toggle button{flex:1;padding:9px;background:var(--graphite);color:var(--muted);font-weight:600;font-size:13px}
+.cmp-toggle button.on{background:var(--amber);color:#1a1205}
+.cmp-banner{padding:10px 14px;border-radius:var(--radius);font-size:13px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.cmp-banner.nofact{background:rgba(245,165,36,.12);color:var(--amber);border:1px solid var(--amber-dim)}
+.cmp-lines{width:100%;border-collapse:collapse;margin-top:4px}
+.cmp-lines th{padding:8px 10px;font-size:11px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);text-align:left}
+.cmp-lines td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.cmp-lines input,.cmp-lines select{width:100%;padding:7px 9px;background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-size:13px}
+.cmp-lines input:focus,.cmp-lines select:focus{outline:none;border-color:var(--amber)}
+.cmp-lines input[readonly]{background:var(--panel);color:var(--muted);border-color:transparent}
+.cmp-num{text-align:right;font-variant-numeric:tabular-nums}
+.cmp-prodwrap{position:relative}
+.cmp-prodhits{position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);max-height:240px;overflow-y:auto;margin-top:2px;display:none}
+.cmp-prodhits.show{display:block}
+.cmp-prodhit{padding:8px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5)}
+.cmp-prodhit:hover{background:var(--panel)}
+.cmp-prodhit b{color:var(--amber)}
+.cmp-prodinfo{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4}
+.cmp-delrow{background:none;color:var(--muted);font-size:18px;line-height:1;padding:4px 8px}
+.cmp-delrow:hover{color:var(--danger)}
+.cmp-totals{display:flex;justify-content:flex-end;gap:26px;padding:16px 20px;border-top:1px solid var(--line);margin-top:4px}
+.cmp-totals .tt{text-align:right}
+.cmp-totals .tt .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.cmp-totals .tt .v{font-family:'Barlow Condensed';font-size:24px;font-weight:700}
+.cmp-totals .tt.total .v{color:var(--amber)}
+.cmp-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end}
+.cmp-filters .field{margin:0;min-width:130px}
+.cmp-filters .field.sm{min-width:110px}
+.cmp-filters label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+.cmp-filters input,.cmp-filters select{padding:8px 10px;background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-size:13px;width:100%}
+@media(max-width:760px){ .picker-grid{grid-template-columns:1fr} .picker-list{height:200px} .cmp-head{grid-template-columns:1fr} }
 @media(max-width:720px){
   .sidebar{width:64px}.brand,.navlink span.lbl,.userbox .u-name,.userbox .u-rol,.logout{display:none}
   .navlink{justify-content:center;padding:12px 0}
@@ -513,11 +547,515 @@ async function simpleList(tabla,titulo,cols,mapRow){
   content.innerHTML=tableShell(titulo,cols,rows);
 }
 
+// ============================================================
+// ===================  MÓDULO COMPRAS  =======================
+// ============================================================
+let CMP_CACHE_PROV=null, CMP_CACHE_ALIC=null, CMP_CACHE_COMP=null, CMP_CACHE_CAJAS=null;
+
+async function cmpCargarCatalogos(){
+  if(!CMP_CACHE_PROV){
+    const {data}=await sb.from('proveedores').select('id,nombre').order('nombre');
+    CMP_CACHE_PROV=data||[];
+  }
+  if(!CMP_CACHE_ALIC){
+    const {data}=await sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id');
+    CMP_CACHE_ALIC=data||[];
+  }
+  if(!CMP_CACHE_COMP){
+    const {data}=await sb.from('tipos_comprobante').select('id,nombre,letra,discrimina_iva').eq('activo',true).order('id');
+    CMP_CACHE_COMP=data||[];
+  }
+  if(!CMP_CACHE_CAJAS){
+    const {data}=await sb.from('cajas').select('id,nombre').eq('activo',true).order('id');
+    CMP_CACHE_CAJAS=data||[];
+  }
+}
+
+// -------------------- LISTADO --------------------
+const CMP_FILT={prov:'',num:'',desde:'',hasta:'',fact:'',estado:'',pago:''};
+
 PAGES.compras=async ()=>{
-  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nueva compra (próximo)</button>`;
-  await simpleList('compras','Facturas de compra',['Fecha','N° Factura','Total',''],
-    c=>`<tr><td>${c.fecha}</td><td>${c.numero_factura||'—'}</td><td>${money(c.total)}</td><td></td></tr>`);
+  loading();
+  await cmpCargarCatalogos();
+  topActions.innerHTML=`<button class="btn" onclick="cmpNueva()">+ Nueva compra</button>`;
+  content.innerHTML=`
+    <div class="cmp-filters">
+      <div class="field"><label>Proveedor</label>
+        <select id="cf-prov"><option value="">Todos</option>
+          ${CMP_CACHE_PROV.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}</select></div>
+      <div class="field sm"><label>N° comprobante</label><input id="cf-num" placeholder="Buscar…"></div>
+      <div class="field sm"><label>Desde</label><input id="cf-desde" type="date"></div>
+      <div class="field sm"><label>Hasta</label><input id="cf-hasta" type="date"></div>
+      <div class="field sm"><label>Facturada</label>
+        <select id="cf-fact"><option value="">Todas</option><option value="true">Facturada</option><option value="false">Sin facturar</option></select></div>
+      <div class="field sm"><label>Estado</label>
+        <select id="cf-estado"><option value="">Todos</option><option value="borrador">Borrador</option><option value="confirmada">Confirmada</option><option value="anulada">Anulada</option></select></div>
+      <div class="field sm"><label>Pago</label>
+        <select id="cf-pago"><option value="">Todos</option><option value="pagado">Pagada</option><option value="parcial">Parcial</option><option value="pendiente">Pendiente</option></select></div>
+      <button class="btn btn-sm" onclick="cmpAplicarFiltros()">Filtrar</button>
+      <button class="btn btn-ghost btn-sm" onclick="cmpLimpiarFiltros()">Limpiar</button>
+    </div>
+    <div id="cmp-list"><div class="loading">Cargando…</div></div>`;
+  // restaurar valores de filtro
+  $('cf-prov').value=CMP_FILT.prov; $('cf-num').value=CMP_FILT.num;
+  $('cf-desde').value=CMP_FILT.desde; $('cf-hasta').value=CMP_FILT.hasta;
+  $('cf-fact').value=CMP_FILT.fact; $('cf-estado').value=CMP_FILT.estado; $('cf-pago').value=CMP_FILT.pago;
+  $('cf-num').addEventListener('keydown',e=>{ if(e.key==='Enter') cmpAplicarFiltros(); });
+  await cmpRenderList();
 };
+
+function cmpAplicarFiltros(){
+  CMP_FILT.prov=$('cf-prov').value; CMP_FILT.num=$('cf-num').value.trim();
+  CMP_FILT.desde=$('cf-desde').value; CMP_FILT.hasta=$('cf-hasta').value;
+  CMP_FILT.fact=$('cf-fact').value; CMP_FILT.estado=$('cf-estado').value; CMP_FILT.pago=$('cf-pago').value;
+  cmpRenderList();
+}
+function cmpLimpiarFiltros(){
+  Object.keys(CMP_FILT).forEach(k=>CMP_FILT[k]='');
+  ['cf-prov','cf-num','cf-desde','cf-hasta','cf-fact','cf-estado','cf-pago'].forEach(id=>{const e=$(id); if(e) e.value='';});
+  cmpRenderList();
+}
+
+async function cmpRenderList(){
+  const box=$('cmp-list'); if(!box) return;
+  box.innerHTML='<div class="loading">Cargando…</div>';
+  let q=sb.from('compras')
+    .select('id,fecha,numero_factura,facturada,condicion_pago,neto,iva,total,estado,estado_pago,proveedor_id,tipo_comprobante_id')
+    .order('creado_en',{ascending:false});
+  if(CMP_FILT.prov)  q=q.eq('proveedor_id',CMP_FILT.prov);
+  if(CMP_FILT.num)   q=q.ilike('numero_factura','%'+CMP_FILT.num+'%');
+  if(CMP_FILT.desde) q=q.gte('fecha',CMP_FILT.desde);
+  if(CMP_FILT.hasta) q=q.lte('fecha',CMP_FILT.hasta);
+  if(CMP_FILT.fact)  q=q.eq('facturada',CMP_FILT.fact==='true');
+  if(CMP_FILT.estado)q=q.eq('estado',CMP_FILT.estado);
+  if(CMP_FILT.pago)  q=q.eq('estado_pago',CMP_FILT.pago);
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  const provName=id=>{const p=CMP_CACHE_PROV.find(x=>x.id===id);return p?p.nombre:'—';};
+  const compName=id=>{const c=CMP_CACHE_COMP.find(x=>x.id===id);return c?c.nombre:'—';};
+  const estTag=e=>e==='confirmada'?'<span class="tag ok">Confirmada</span>':e==='anulada'?'<span class="tag pend">Anulada</span>':'<span class="tag warn">Borrador</span>';
+  const pagoTag=p=>p==='pagado'?'<span class="tag ok">Pagada</span>':p==='parcial'?'<span class="tag warn">Parcial</span>':'<span class="tag pend">Pendiente</span>';
+  const factTag=f=>f?'<span class="tag ok">Facturada</span>':'<span class="tag warn">Sin factura</span>';
+  const rows=(data||[]).map(c=>`<tr style="cursor:pointer" onclick="cmpVer(${c.id})">
+    <td>${c.fecha}</td>
+    <td>${provName(c.proveedor_id)}</td>
+    <td>${compName(c.tipo_comprobante_id)}${c.numero_factura?'<br><span style="color:var(--muted);font-size:11px">'+c.numero_factura+'</span>':''}</td>
+    <td>${c.condicion_pago==='cta_cte'?'Cta. cte.':'Contado'}</td>
+    <td>${factTag(c.facturada)}</td>
+    <td class="cmp-num">${money(c.neto)}</td>
+    <td class="cmp-num">${money(c.iva)}</td>
+    <td class="cmp-num" style="font-weight:600">${money(c.total)}</td>
+    <td>${estTag(c.estado)}</td>
+    <td>${pagoTag(c.estado_pago)}</td>
+  </tr>`).join('');
+  box.innerHTML=tableShell('Compras',
+    ['Fecha','Proveedor','Comprobante','Pago','Fiscal','Neto','IVA','Total','Estado','Estado pago'],rows);
+};
+// -------------------- NUEVA COMPRA --------------------
+let CMP_ESTADO=null;   // estado del formulario en edición
+let CMP_LINE_SEQ=0;
+
+function cmpEsAdmin(){ return currentProfile && currentProfile.rol==='admin'; }
+
+async function cmpNueva(){
+  await cmpCargarCatalogos();
+  CMP_ESTADO={
+    id:null, facturada:true, lineas:[]
+  };
+  cmpRenderForm();
+  cmpAddLinea();
+}
+
+function cmpRenderForm(){
+  pageTitle.textContent='Nueva compra';
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('compras')">← Volver al listado</button>`;
+  const alicOpts=CMP_CACHE_ALIC.map(a=>`<option value="${a.id}" data-pct="${a.porcentaje}">${a.nombre}</option>`).join('');
+  // comprobantes: si no facturada, sólo "Sin comprobante"
+  const compFiscales=CMP_CACHE_COMP.filter(c=>c.letra!=='X'||c.nombre==='Remito');
+  const compNoFisc=CMP_CACHE_COMP.filter(c=>c.nombre==='Sin comprobante');
+  const compOpts=(CMP_ESTADO.facturada?compFiscales:compNoFisc)
+    .map(c=>`<option value="${c.id}" data-disc="${c.discrimina_iva}">${c.nombre}</option>`).join('');
+
+  content.innerHTML=`
+    <div id="cmp-msg"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Datos de la compra</h3>
+        <div class="cmp-toggle" style="width:220px" id="cmp-facttoggle">
+          <button class="${CMP_ESTADO.facturada?'on':''}" onclick="cmpSetFacturada(true)">Facturada</button>
+          ${cmpEsAdmin()?`<button class="${!CMP_ESTADO.facturada?'on':''}" onclick="cmpSetFacturada(false)">Sin facturación</button>`:''}
+        </div>
+      </div>
+      <div style="padding:18px">
+        ${!CMP_ESTADO.facturada?`<div class="cmp-banner nofact">⚠ Operación NO facturada — no genera IVA crédito fiscal. Sólo registro interno.</div>`:''}
+        <div class="cmp-head">
+          <div class="field"><label>Proveedor *</label>
+            <select id="cmp-prov"><option value="">Elegí proveedor…</option>
+              ${CMP_CACHE_PROV.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}</select></div>
+          <div class="field"><label>Fecha</label><input id="cmp-fecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div class="field"><label>Tipo de comprobante${CMP_ESTADO.facturada?' *':''}</label>
+            <select id="cmp-comp" ${!CMP_ESTADO.facturada?'disabled':''} onchange="cmpRecalcular()">${compOpts}</select></div>
+          <div class="field"><label>N° de comprobante</label><input id="cmp-num" placeholder="0001-00001234" ${!CMP_ESTADO.facturada?'disabled':''}></div>
+          <div class="field"><label>Condición de pago</label>
+            <select id="cmp-cond" onchange="cmpToggleCaja()"><option value="contado">Contado</option><option value="cta_cte">Cuenta corriente</option></select></div>
+          <div class="field" id="cmp-caja-wrap"><label>Caja (pago) *</label>
+            <select id="cmp-caja">${CMP_CACHE_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+        </div>
+        <div class="field" style="margin-top:4px"><label>Observaciones</label><input id="cmp-notas" placeholder="Opcional"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Productos</h3>
+        <button class="btn btn-sm" onclick="cmpAddLinea()">+ Agregar línea</button></div>
+      <div style="padding:14px 18px">
+        <table class="cmp-lines" id="cmp-lines-tbl">
+          <thead><tr>
+            <th style="width:32%">Producto</th>
+            <th style="width:10%">Cantidad</th>
+            <th style="width:15%">${CMP_ESTADO.facturada?'Costo neto unit.':'Costo unit.'}</th>
+            ${CMP_ESTADO.facturada?'<th style="width:13%">Alícuota IVA</th>':''}
+            <th style="width:12%" class="cmp-num">Neto</th>
+            ${CMP_ESTADO.facturada?'<th style="width:10%" class="cmp-num">IVA</th>':''}
+            <th style="width:12%" class="cmp-num">Total</th>
+            <th style="width:4%"></th>
+          </tr></thead>
+          <tbody id="cmp-lines-body"></tbody>
+        </table>
+      </div>
+      <div class="cmp-totals">
+        <div class="tt"><div class="k">Neto</div><div class="v" id="cmp-tot-neto">$0,00</div></div>
+        ${CMP_ESTADO.facturada?'<div class="tt"><div class="k">IVA</div><div class="v" id="cmp-tot-iva">$0,00</div></div>':''}
+        <div class="tt total"><div class="k">Total</div><div class="v" id="cmp-tot-total">$0,00</div></div>
+      </div>
+      <div style="padding:16px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="cmpGuardar('borrador')">Guardar borrador</button>
+        <button class="btn" onclick="cmpGuardar('confirmar')">Confirmar compra</button>
+      </div>
+    </div>`;
+  // pintar líneas ya existentes en estado
+  cmpRenderLineas();
+  cmpToggleCaja();
+  const alicDefault=CMP_CACHE_ALIC.find(a=>a.porcentaje==21);
+  CMP_ESTADO._alicDefault = alicDefault?alicDefault.id:(CMP_CACHE_ALIC[0]&&CMP_CACHE_ALIC[0].id);
+}
+
+function cmpSetFacturada(v){
+  if(v===CMP_ESTADO.facturada) return;
+  CMP_ESTADO.facturada=v;
+  cmpRenderForm();
+  if(!CMP_ESTADO.lineas.length) cmpAddLinea();
+}
+
+function cmpToggleCaja(){
+  const cond=$('cmp-cond'); const wrap=$('cmp-caja-wrap');
+  if(!cond||!wrap) return;
+  wrap.style.display = cond.value==='contado' ? '' : 'none';
+}
+
+// -------- líneas --------
+function cmpAddLinea(){
+  const alicDefault=CMP_CACHE_ALIC.find(a=>a.porcentaje==21);
+  CMP_ESTADO.lineas.push({
+    uid:++CMP_LINE_SEQ, producto_id:null, texto:'', cantidad:1,
+    costo:0, alicuota_id:alicDefault?alicDefault.id:(CMP_CACHE_ALIC[0]?CMP_CACHE_ALIC[0].id:null),
+    info:''
+  });
+  cmpRenderLineas();
+}
+function cmpDelLinea(uid){
+  CMP_ESTADO.lineas=CMP_ESTADO.lineas.filter(l=>l.uid!==uid);
+  if(!CMP_ESTADO.lineas.length) cmpAddLinea(); else cmpRenderLineas();
+}
+
+function cmpRenderLineas(){
+  const body=$('cmp-lines-body'); if(!body) return;
+  const fact=CMP_ESTADO.facturada;
+  const alicOpts=(sel)=>CMP_CACHE_ALIC.map(a=>`<option value="${a.id}" ${a.id===sel?'selected':''}>${a.nombre}</option>`).join('');
+  body.innerHTML=CMP_ESTADO.lineas.map(l=>{
+    const calc=cmpCalcLinea(l);
+    return `<tr data-uid="${l.uid}">
+      <td>
+        <div class="cmp-prodwrap">
+          <input placeholder="Código o nombre…" value="${(l.texto||'').replace(/"/g,'&quot;')}"
+            oninput="cmpBuscarProd(${l.uid},this.value)" onfocus="cmpBuscarProd(${l.uid},this.value)" autocomplete="off">
+          <div class="cmp-prodhits" id="cmp-hits-${l.uid}"></div>
+        </div>
+        ${l.info?`<div class="cmp-prodinfo">${l.info}</div>`:''}
+      </td>
+      <td><input type="number" min="0" step="1" value="${l.cantidad}" class="cmp-num" oninput="cmpUpd(${l.uid},'cantidad',this.value)"></td>
+      <td><input type="number" min="0" step="0.01" value="${l.costo}" class="cmp-num" oninput="cmpUpd(${l.uid},'costo',this.value)"></td>
+      ${fact?`<td><select onchange="cmpUpd(${l.uid},'alicuota_id',this.value)">${alicOpts(l.alicuota_id)}</select></td>`:''}
+      <td class="cmp-num"><input readonly value="${money(calc.neto)}"></td>
+      ${fact?`<td class="cmp-num"><input readonly value="${money(calc.iva)}"></td>`:''}
+      <td class="cmp-num"><input readonly value="${money(calc.total)}" style="font-weight:600"></td>
+      <td><button class="cmp-delrow" onclick="cmpDelLinea(${l.uid})" title="Eliminar">×</button></td>
+    </tr>`;
+  }).join('');
+  cmpRenderTotales();
+}
+
+// Cálculo por línea según facturación y comprobante.
+// - No facturada: neto = total = costo*cant, iva 0.
+// - Facturada A (discrimina): costo es NETO -> se suma IVA.
+// - Facturada B/C (no discrimina): costo es TOTAL -> neto hacia atrás.
+function cmpCalcLinea(l){
+  const cant=Number(l.cantidad)||0, costo=Number(l.costo)||0;
+  const base=cant*costo;
+  if(!CMP_ESTADO.facturada){ return {neto:base, iva:0, total:base}; }
+  const alic=CMP_CACHE_ALIC.find(a=>a.id===Number(l.alicuota_id));
+  const pct=alic?Number(alic.porcentaje):0;
+  const comp=CMP_CACHE_COMP.find(c=>c.id===Number($('cmp-comp')?.value));
+  const discrimina = comp? comp.discrimina_iva : true;
+  if(pct===0){ return {neto:base, iva:0, total:base}; }
+  if(discrimina){
+    const neto=base, iva=base*pct/100; return {neto, iva, total:neto+iva};
+  } else {
+    // costo ingresado es total con IVA (B/C)
+    const total=base, neto=total/(1+pct/100); return {neto, iva:total-neto, total};
+  }
+}
+
+function cmpUpd(uid,campo,val){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(!l) return;
+  l[campo]=val;
+  // sólo recalcular números sin repintar todo (para no perder foco)
+  const tr=document.querySelector(`tr[data-uid="${uid}"]`);
+  if(tr){
+    const calc=cmpCalcLinea(l);
+    const fact=CMP_ESTADO.facturada;
+    const readonlys=tr.querySelectorAll('input[readonly]');
+    // orden: neto, [iva], total
+    let i=0;
+    readonlys[i++].value=money(calc.neto);
+    if(fact) readonlys[i++].value=money(calc.iva);
+    readonlys[i++].value=money(calc.total);
+  }
+  cmpRenderTotales();
+}
+function cmpRecalcular(){ cmpRenderLineas(); }
+
+function cmpRenderTotales(){
+  let neto=0,iva=0,total=0;
+  CMP_ESTADO.lineas.forEach(l=>{ const c=cmpCalcLinea(l); neto+=c.neto; iva+=c.iva; total+=c.total; });
+  const en=$('cmp-tot-neto'), ei=$('cmp-tot-iva'), et=$('cmp-tot-total');
+  if(en) en.textContent=money(neto);
+  if(ei) ei.textContent=money(iva);
+  if(et) et.textContent=money(total);
+}
+
+// -------- búsqueda de producto por línea (código o nombre) --------
+let CMP_BUSCA_T=null;
+function cmpBuscarProd(uid,q){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(l) l.texto=q;
+  const box=$('cmp-hits-'+uid); if(!box) return;
+  if(!q||q.trim().length<2){ box.classList.remove('show'); box.innerHTML=''; return; }
+  clearTimeout(CMP_BUSCA_T);
+  CMP_BUSCA_T=setTimeout(async ()=>{
+    const term=q.trim();
+    // 1) por código/equivalencia (RPC existente)  2) por nombre/código (tabla)
+    const [rpc,tabla]=await Promise.all([
+      sb.rpc('buscar_por_codigo',{q:term}),
+      sb.from('productos').select('id,codigo,nombre,stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva')
+        .or(`nombre.ilike.%${term}%,codigo.ilike.%${term}%`).limit(8)
+    ]);
+    const vistos=new Set(); const items=[];
+    (rpc.data||[]).forEach(r=>{ if(r.producto_id&&!vistos.has(r.producto_id)){ vistos.add(r.producto_id);
+      items.push({id:r.producto_id,codigo:r.codigo_wega,nombre:r.aplicacion||r.codigo_wega,stock:r.stock}); }});
+    (tabla.data||[]).forEach(r=>{ if(!vistos.has(r.id)){ vistos.add(r.id);
+      items.push({id:r.id,codigo:r.codigo,nombre:r.nombre,stock:r.stock,
+        ucn:r.ultimo_costo_neto,ucf:r.ultimo_costo_final,ualic:r.ultima_alicuota_iva}); }});
+    if(!items.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
+    box.innerHTML=items.slice(0,10).map(it=>`<div class="cmp-prodhit" onclick='cmpElegirProd(${uid},${JSON.stringify(it).replace(/'/g,"&#39;")})'>
+        <b>${it.codigo||'—'}</b> · ${it.nombre||''} <span style="color:var(--muted)">(stock ${Number(it.stock)||0})</span></div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+
+async function cmpElegirProd(uid,it){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(!l) return;
+  l.producto_id=it.id;
+  l.texto=(it.codigo?it.codigo+' · ':'')+(it.nombre||'');
+  // si no vinieron los costos (caso RPC), traerlos
+  let ucn=it.ucn, ucf=it.ucf, ualic=it.ualic, stock=it.stock;
+  if(ucn===undefined){
+    const {data}=await sb.from('productos').select('stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva,alicuota_iva_venta_id').eq('id',it.id).single();
+    if(data){ ucn=data.ultimo_costo_neto; ucf=data.ultimo_costo_final; ualic=data.ultima_alicuota_iva; stock=data.stock; }
+  }
+  l.info=`Stock actual: <b>${Number(stock)||0}</b> · Últ. costo neto: <b>${money(ucn||0)}</b> · Últ. costo final: <b>${money(ucf||0)}</b> · Alíc. habitual: <b>${ualic||0}%</b>`;
+  // proponer costo y alícuota habituales si están vacíos
+  if((!l.costo||Number(l.costo)===0) && ucn) l.costo=ucn;
+  if(ualic){ const a=CMP_CACHE_ALIC.find(x=>Number(x.porcentaje)===Number(ualic)); if(a) l.alicuota_id=a.id; }
+  const box=$('cmp-hits-'+uid); if(box){ box.classList.remove('show'); box.innerHTML=''; }
+  cmpRenderLineas();
+}
+
+// -------- guardar / confirmar --------
+async function cmpGuardar(accion){
+  const msg=$('cmp-msg');
+  const setMsg=(t,tipo)=>{ msg.innerHTML=`<div class="msg ${tipo}">${t}</div>`; msg.scrollIntoView({behavior:'smooth',block:'nearest'}); };
+  // validaciones frontend
+  const proveedor_id=Number($('cmp-prov').value)||null;
+  if(!proveedor_id){ setMsg('Elegí un proveedor.','error'); return; }
+  const facturada=CMP_ESTADO.facturada;
+  const tipo_comprobante_id=Number($('cmp-comp').value)||null;
+  if(facturada && !tipo_comprobante_id){ setMsg('Elegí el tipo de comprobante.','error'); return; }
+  const condicion_pago=$('cmp-cond').value;
+  const caja_id = condicion_pago==='contado' ? (Number($('cmp-caja').value)||null) : null;
+  if(condicion_pago==='contado' && !caja_id){ setMsg('Elegí la caja de la que sale el pago.','error'); return; }
+  const lineasValidas=CMP_ESTADO.lineas.filter(l=>l.producto_id && Number(l.cantidad)>0 && Number(l.costo)>0);
+  if(!lineasValidas.length){ setMsg('Agregá al menos una línea con producto, cantidad y costo.','error'); return; }
+
+  // permiso frontend (el candado real está en SQL)
+  if(!facturada && !cmpEsAdmin()){ setMsg('Sólo un administrador puede registrar compras sin facturación.','error'); return; }
+
+  const btns=document.querySelectorAll('.cmp-totals ~ div button'); btns.forEach(b=>b.disabled=true);
+  setMsg('Guardando…','ok');
+
+  // 1) cabecera en borrador
+  const cab={
+    proveedor_id, fecha:$('cmp-fecha').value||new Date().toISOString().slice(0,10),
+    facturada, naturaleza: facturada?'fiscal':'interna',
+    tipo_comprobante_id: facturada?tipo_comprobante_id:(CMP_CACHE_COMP.find(c=>c.nombre==='Sin comprobante')||{}).id,
+    numero_factura: facturada ? ($('cmp-num').value.trim()||null) : null,
+    condicion_pago, notas:$('cmp-notas').value.trim()||null,
+    estado:'borrador', creado_por: currentUser.id
+  };
+  const {data:compraIns,error:e1}=await sb.from('compras').insert(cab).select('id').single();
+  if(e1){
+    btns.forEach(b=>b.disabled=false);
+    if(e1.code==='23505') return setMsg('Ya existe una compra con ese número para este proveedor.','error');
+    return setMsg('Error al guardar la compra: '+e1.message,'error');
+  }
+  const compra_id=compraIns.id;
+
+  // 2) items. En A guardamos neto_unitario; en B/C guardamos subtotal (total) y neto_unitario 0.
+  const comp=CMP_CACHE_COMP.find(c=>c.id===tipo_comprobante_id);
+  const discrimina = facturada ? (comp?comp.discrimina_iva:true) : false;
+  const items=lineasValidas.map(l=>{
+    const cant=Number(l.cantidad), costo=Number(l.costo);
+    const base=cant*costo;
+    const row={ compra_id, producto_id:l.producto_id, cantidad:cant,
+      alicuota_iva_id: facturada ? Number(l.alicuota_id)||null : null };
+    if(facturada && !discrimina){
+      // B/C: el costo es total con IVA -> mando subtotal, neto en 0 para que la función lo calcule
+      row.neto_unitario=0; row.costo_unitario=0; row.subtotal=base;
+    } else {
+      // A o no facturada: costo es neto unitario
+      row.neto_unitario=costo; row.costo_unitario=costo; row.subtotal=base;
+    }
+    return row;
+  });
+  const {error:e2}=await sb.from('compra_items').insert(items);
+  if(e2){
+    btns.forEach(b=>b.disabled=false);
+    return setMsg('La compra se creó (borrador) pero falló al cargar los productos: '+e2.message+'. Podés retomarla desde el listado.','error');
+  }
+
+  if(accion==='borrador'){
+    setMsg('Borrador guardado. Podés confirmarlo más tarde desde el listado.','ok');
+    setTimeout(()=>go('compras'),900);
+    return;
+  }
+
+  // 3) confirmar (transaccional en el servidor)
+  const {error:e3}=await sb.rpc('confirmar_compra',{ p_compra_id:compra_id, p_caja_id: caja_id });
+  if(e3){
+    btns.forEach(b=>b.disabled=false);
+    // mensajes claros según el raise de la función
+    let m=e3.message||'Error al confirmar.';
+    if(/administrador/i.test(m)) m='Sólo un administrador puede registrar compras sin facturación.';
+    else if(/requiere una caja/i.test(m)) m='Falta elegir la caja para el pago de contado.';
+    else if(/ya está confirmada/i.test(m)) m='Esta compra ya estaba confirmada.';
+    return setMsg('No se pudo confirmar: '+m+' (la compra quedó en borrador).','error');
+  }
+  setMsg('✓ Compra confirmada. Stock, costos y caja actualizados.','ok');
+  setTimeout(()=>go('compras'),1000);
+}
+
+// -------------------- VER COMPRA (detalle) --------------------
+async function cmpVer(id){
+  await cmpCargarCatalogos();
+  const [{data:c},{data:items}]=await Promise.all([
+    sb.from('compras').select('*').eq('id',id).single(),
+    sb.from('compra_items').select('*').eq('compra_id',id)
+  ]);
+  if(!c) return;
+  const prov=CMP_CACHE_PROV.find(p=>p.id===c.proveedor_id);
+  const comp=CMP_CACHE_COMP.find(x=>x.id===c.tipo_comprobante_id);
+  // traer nombres de producto
+  const ids=[...new Set((items||[]).map(i=>i.producto_id).filter(Boolean))];
+  let prods={};
+  if(ids.length){ const {data:pr}=await sb.from('productos').select('id,codigo,nombre').in('id',ids);
+    (pr||[]).forEach(p=>prods[p.id]=p); }
+  const fact=c.facturada;
+  const filas=(items||[]).map(i=>{
+    const p=prods[i.producto_id]||{};
+    return `<tr><td>${p.codigo||'—'} ${p.nombre||''}</td><td class="cmp-num">${i.cantidad}</td>
+      <td class="cmp-num">${money(i.neto_subtotal)}</td>
+      ${fact?`<td class="cmp-num">${i.alicuota_iva}%</td><td class="cmp-num">${money(i.iva_monto)}</td>`:''}
+      <td class="cmp-num" style="font-weight:600">${money(i.subtotal)}</td></tr>`;
+  }).join('');
+  const puedeConfirmar=c.estado==='borrador';
+  const puedeAnular=c.estado==='confirmada' && cmpEsAdmin();
+  pageTitle.textContent='Compra #'+c.id;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('compras')">← Volver</button>`;
+  content.innerHTML=`
+    <div id="cmp-msg"></div>
+    <div class="panel" style="margin-bottom:16px"><div style="padding:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Proveedor</div><div>${prov?prov.nombre:'—'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Fecha</div><div>${c.fecha}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Comprobante</div><div>${comp?comp.nombre:'—'} ${c.numero_factura||''}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Fiscal</div><div>${fact?'<span class="tag ok">Facturada</span>':'<span class="tag warn">Sin factura</span>'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Pago</div><div>${c.condicion_pago==='cta_cte'?'Cuenta corriente':'Contado'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Estado</div><div>${c.estado}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Estado pago</div><div>${c.estado_pago}</div></div>
+      ${c.notas?`<div style="grid-column:1/-1"><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Observaciones</div><div>${c.notas}</div></div>`:''}
+    </div></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Detalle</h3></div>
+      <table class="cmp-lines"><thead><tr><th>Producto</th><th class="cmp-num">Cant.</th><th class="cmp-num">Neto</th>
+        ${fact?'<th class="cmp-num">Alíc.</th><th class="cmp-num">IVA</th>':''}<th class="cmp-num">Total</th></tr></thead>
+        <tbody>${filas}</tbody></table>
+      <div class="cmp-totals">
+        <div class="tt"><div class="k">Neto</div><div class="v">${money(c.neto)}</div></div>
+        ${fact?`<div class="tt"><div class="k">IVA</div><div class="v">${money(c.iva)}</div></div>`:''}
+        <div class="tt total"><div class="k">Total</div><div class="v">${money(c.total)}</div></div>
+      </div>
+      ${(puedeConfirmar||puedeAnular)?`<div style="padding:16px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end">
+        ${puedeConfirmar?`<button class="btn" onclick="cmpConfirmarExistente(${c.id},'${c.condicion_pago}')">Confirmar compra</button>`:''}
+        ${puedeAnular?`<button class="btn btn-ghost" onclick="cmpAnular(${c.id})">Anular compra</button>`:''}
+      </div>`:''}
+    </div>`;
+}
+
+async function cmpConfirmarExistente(id,cond){
+  const msg=$('cmp-msg'); const setMsg=(t,tipo)=>msg.innerHTML=`<div class="msg ${tipo}">${t}</div>`;
+  let caja_id=null;
+  if(cond==='contado'){
+    // pedir caja con un modal simple
+    const cajaOpts=CMP_CACHE_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+    openModal('Confirmar compra',`<div class="field"><label>¿De qué caja sale el pago?</label><select id="mk-caja">${cajaOpts}</select></div>`,
+      `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="cmpDoConfirm(${id})">Confirmar</button>`);
+    return;
+  }
+  await cmpDoConfirm(id,null);
+}
+async function cmpDoConfirm(id){
+  const caja=$('mk-caja')? Number($('mk-caja').value):null;
+  closeModal();
+  const {error}=await sb.rpc('confirmar_compra',{p_compra_id:id,p_caja_id:caja});
+  const msg=$('cmp-msg');
+  if(error){ if(msg) msg.innerHTML=`<div class="msg error">No se pudo confirmar: ${error.message}</div>`; return; }
+  cmpVer(id);
+}
+async function cmpAnular(id){
+  if(!confirm('¿Anular esta compra? Se revertirá el stock y la deuda generada.')) return;
+  const {error}=await sb.rpc('anular_compra',{p_compra_id:id});
+  const msg=$('cmp-msg');
+  if(error){ if(msg) msg.innerHTML=`<div class="msg error">No se pudo anular: ${error.message}</div>`; return; }
+  cmpVer(id);
+}
+
 PAGES.presupuestos=async ()=>{
   topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nuevo presupuesto (próximo)</button>`;
   await simpleList('presupuestos','Presupuestos',['Fecha','Estado','Total',''],
