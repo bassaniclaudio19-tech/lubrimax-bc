@@ -238,6 +238,10 @@ select:disabled{opacity:.5}
 
 /* ---- BUSCADOR v2: cascada, ficha, tabla, carrito ---- */
 .bus-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.bus-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.bus-grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.bus-refina-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);
+  margin:16px 0 6px;padding-top:12px;border-top:1px solid var(--line)}
 .bus-input{width:100%;padding:10px 12px;background:var(--graphite);border:1px solid var(--line);
   border-radius:var(--radius);color:var(--text)}
 .bus-input:focus{outline:none;border-color:var(--amber)}
@@ -289,6 +293,8 @@ select:disabled{opacity:.5}
 
 @media(max-width:860px){
   .bus-grid{grid-template-columns:1fr}
+  .bus-grid3{grid-template-columns:1fr}
+  .bus-grid2{grid-template-columns:1fr}
   .filtro-row{align-items:flex-start}
   .filtro-meta{width:100%;justify-content:space-between}
   .filtro-precio{text-align:left}
@@ -300,6 +306,31 @@ select:disabled{opacity:.5}
     padding:6px 14px;text-align:right}
   .cat-tabla td::before{content:attr(data-l);color:var(--muted);font-size:11px;
     text-transform:uppercase;letter-spacing:.4px;text-align:left;flex-shrink:0}
+}
+
+/* ---- FASE 1: clientes y fichas ---- */
+.cli-toolbar{display:flex;gap:14px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.cli-search{flex:1;min-width:260px;padding:11px 14px;background:var(--graphite);
+  border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-size:15px}
+.cli-search:focus{outline:none;border-color:var(--amber)}
+.cli-chk{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;white-space:nowrap}
+.ficha-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px 20px;padding:18px}
+.ficha-grid > div{display:flex;flex-direction:column;gap:3px}
+.ficha-grid .k{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.veh-list{display:flex;flex-direction:column}
+.veh-item{display:flex;align-items:center;gap:16px;padding:14px 18px;
+  border-bottom:1px solid var(--line);cursor:pointer}
+.veh-item:last-child{border-bottom:none}
+.veh-item:hover{background:var(--panel-2)}
+.veh-pat{font-family:'Barlow Condensed';font-size:19px;font-weight:700;color:var(--amber);
+  letter-spacing:1px;min-width:110px}
+.veh-desc{flex:1;font-size:13px}
+.veh-sub{font-size:11px;color:var(--muted);margin-top:3px}
+.veh-go{color:var(--muted);font-size:22px}
+@media(max-width:860px){
+  .ficha-grid{grid-template-columns:1fr}
+  .veh-item{flex-wrap:wrap;gap:8px}
+  .veh-pat{min-width:auto}
 }
 </style>
 </head>
@@ -560,33 +591,347 @@ async function saveAjuste(id,anterior){
   closeModal(); PAGES.stock();
 }
 
-// ----- CLIENTES -----
+// ----- CLIENTES (ficha 360) -----
+let CLI_Q='', CLI_SOLO_ACTIVOS=true, CLI_ACTUAL=null, VEH_ACTUAL=null;
+
 PAGES.clientes=async ()=>{
   loading();
-  topActions.innerHTML=`<button class="btn" onclick="formCliente()">+ Nuevo</button>`;
-  const {data}=await sb.from('clientes').select('*').order('nombre');
-  const rows=(data||[]).map(c=>`<tr><td>${c.nombre}</td><td>${c.cuit_dni||'—'}</td><td>${c.telefono||'—'}</td>
-    <td>${money(c.saldo_cta_cte)}</td>
-    <td><button class="btn btn-ghost btn-sm" onclick='formCliente(${JSON.stringify(c)})'>Editar</button></td></tr>`).join('');
-  content.innerHTML=tableShell('Clientes',['Nombre','CUIT/DNI','Teléfono','Saldo cta. cte.',''],rows);
+  topActions.innerHTML=`<button class="btn" onclick="formCliente()">+ Nuevo cliente</button>`;
+  content.innerHTML=`
+    <div class="cli-toolbar">
+      <input id="cli-q" class="cli-search" placeholder="Buscar por nombre, documento, teléfono o patente…"
+             value="${CLI_Q.replace(/"/g,'&quot;')}" autocomplete="off">
+      <label class="cli-chk"><input type="checkbox" id="cli-act" ${CLI_SOLO_ACTIVOS?'checked':''}> Solo activos</label>
+    </div>
+    <div id="cli-list"><div class="loading">Cargando…</div></div>`;
+  const inp=$('cli-q'); let t=null;
+  inp.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(()=>{CLI_Q=inp.value; cliRender();},250); });
+  $('cli-act').addEventListener('change',e=>{ CLI_SOLO_ACTIVOS=e.target.checked; cliRender(); });
+  inp.focus();
+  await cliRender();
 };
-function formCliente(c){c=c||{};
+
+async function cliRender(){
+  const box=$('cli-list'); if(!box) return;
+  const {data,error}=await sb.rpc('buscar_clientes',{q:CLI_Q||null,p_solo_activos:CLI_SOLO_ACTIVOS});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){
+    box.innerHTML='<div class="panel"><div class="empty">'+
+      (CLI_Q?'Sin resultados para "'+CLI_Q+'".':'Todavía no hay clientes cargados.')+'</div></div>'; return; }
+  const rows=data.map(c=>`<tr style="cursor:pointer" onclick="cliFicha(${c.id})">
+    <td><b>${c.nombre}</b>${c.activo?'':' <span class="tag pend">Inactivo</span>'}</td>
+    <td>${c.cuit_dni||'—'}</td>
+    <td>${c.telefono||'—'}</td>
+    <td>${c.vehiculos>0?`<span class="tag ok">${c.vehiculos}</span> ${c.patentes||''}`:'—'}</td>
+    <td class="cmp-num" style="font-weight:600;color:${Number(c.saldo)>0?'var(--danger)':'var(--muted)'}">${money(c.saldo)}</td>
+  </tr>`).join('');
+  box.innerHTML=tableShell(`Clientes (${data.length})`,['Nombre','CUIT/DNI','Teléfono','Vehículos','Saldo cta. cte.'],rows);
+}
+
+// ---------- FICHA DEL CLIENTE ----------
+async function cliFicha(id){
+  loading();
+  const [{data:f},{data:vehs}]=await Promise.all([
+    sb.rpc('cliente_ficha',{p_cliente_id:id}),
+    sb.rpc('cliente_vehiculos',{p_cliente_id:id})
+  ]);
+  const c=(f&&f[0])||null;
+  if(!c){ content.innerHTML='<div class="msg error">Cliente no encontrado.</div>'; return; }
+  CLI_ACTUAL=c;
+  pageTitle.textContent=c.nombre;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('clientes')">← Clientes</button>
+    <button class="btn btn-sm" onclick='formCliente(${JSON.stringify({id:c.id,nombre:c.nombre,cuit_dni:c.cuit_dni,telefono:c.telefono,email:c.email,direccion:c.direccion,observaciones:c.observaciones,activo:c.activo}).replace(/'/g,"&#39;")})'>Editar</button>`;
+
+  const stat=(k,v,cls)=>`<div class="stat"><div class="k">${k}</div><div class="v ${cls||''}">${v}</div></div>`;
+  content.innerHTML=`
+    <div class="stats">
+      ${stat('Saldo cta. cte.', money(c.saldo), Number(c.saldo)>0?'danger':'ok')}
+      ${stat('Vehículos', c.n_vehiculos)}
+      ${stat('Trabajos', c.n_trabajos + (c.n_trabajos_abiertos>0?` <small style="font-size:13px;color:var(--amber)">(${c.n_trabajos_abiertos} abiertos)</small>`:''))}
+      ${stat('Total comprado', money(c.total_vendido), 'amber')}
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Datos</h3>
+        ${c.activo?'<span class="tag ok">Activo</span>':'<span class="tag pend">Inactivo</span>'}</div>
+      <div class="ficha-grid">
+        <div><span class="k">CUIT/DNI</span><span>${c.cuit_dni||'—'}</span></div>
+        <div><span class="k">Teléfono</span><span>${c.telefono||'—'}</span></div>
+        <div><span class="k">Email</span><span>${c.email||'—'}</span></div>
+        <div><span class="k">Dirección</span><span>${c.direccion||'—'}</span></div>
+        <div><span class="k">Última visita</span><span>${c.ultima_visita||'—'}</span></div>
+        <div><span class="k">Presupuestos</span><span>${c.n_presupuestos} ${c.n_presupuestos_pendientes>0?`(${c.n_presupuestos_pendientes} pendientes)`:''}</span></div>
+        ${c.observaciones?`<div style="grid-column:1/-1"><span class="k">Observaciones</span><span>${c.observaciones}</span></div>`:''}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Vehículos</h3>
+        <button class="btn btn-sm" onclick="formVehiculoCliente(${c.id})">+ Agregar vehículo</button></div>
+      <div id="cli-vehs"></div>
+    </div>`;
+  pintarVehiculos(vehs||[], c.id);
+}
+
+function pintarVehiculos(vehs, cliente_id){
+  const box=$('cli-vehs'); if(!box) return;
+  if(!vehs.length){ box.innerHTML='<div class="empty">Este cliente no tiene vehículos cargados.</div>'; return; }
+  box.innerHTML='<div class="veh-list">'+vehs.map(v=>`
+    <div class="veh-item" onclick="vehFicha(${v.id})">
+      <div class="veh-pat">${v.patente||'sin patente'}</div>
+      <div class="veh-desc">
+        <b>${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')||'—'}</b>
+        ${v.anio?` · ${v.anio}`:''}
+        ${v.tipo_vehiculo?` <span class="tag warn">${v.tipo_vehiculo}</span>`:''}
+        <div class="veh-sub">
+          ${v.km_actual?Number(v.km_actual).toLocaleString('es-AR')+' km':'km no registrado'}
+          · ${v.n_trabajos} trabajo(s)
+          ${v.ultimo_servicio?' · último '+v.ultimo_servicio:''}
+          ${v.catalogo_txt?` · <span style="color:var(--ok)">catálogo: ${v.catalogo_txt}</span>`:' · <span style="color:var(--muted)">sin vincular al catálogo</span>'}
+        </div>
+      </div>
+      <div class="veh-go">›</div>
+    </div>`).join('')+'</div>';
+}
+
+// ---------- ALTA / EDICIÓN DE CLIENTE ----------
+function formCliente(c){
+  c=c||{};
   openModal(c.id?'Editar cliente':'Nuevo cliente',`
-    <div class="field"><label>Nombre</label><input id="c-nombre" value="${c.nombre||''}"></div>
+    <div class="field"><label>Nombre *</label><input id="c-nombre" value="${(c.nombre||'').replace(/"/g,'&quot;')}"></div>
     <div class="row2">
       <div class="field"><label>CUIT/DNI</label><input id="c-cuit" value="${c.cuit_dni||''}"></div>
       <div class="field"><label>Teléfono</label><input id="c-tel" value="${c.telefono||''}"></div>
     </div>
     <div class="field"><label>Email</label><input id="c-email" value="${c.email||''}"></div>
-    <div class="field"><label>Dirección</label><input id="c-dir" value="${c.direccion||''}"></div>
-  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveCliente(${c.id||'null'})">Guardar</button>`);
+    <div class="field"><label>Dirección</label><input id="c-dir" value="${(c.direccion||'').replace(/"/g,'&quot;')}"></div>
+    <div class="field"><label>Observaciones</label><input id="c-obs" value="${(c.observaciones||'').replace(/"/g,'&quot;')}" placeholder="Notas internas"></div>
+    ${c.id?`<div class="field"><label>Estado</label><select id="c-act">
+        <option value="true" ${c.activo!==false?'selected':''}>Activo</option>
+        <option value="false" ${c.activo===false?'selected':''}>Inactivo</option></select></div>`:''}
+    <div id="c-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveCliente(${c.id||'null'})">Guardar</button>`);
 }
 async function saveCliente(id){
-  const payload={nombre:$('c-nombre').value.trim(),cuit_dni:$('c-cuit').value.trim(),telefono:$('c-tel').value.trim(),email:$('c-email').value.trim(),direccion:$('c-dir').value.trim()};
-  if(!payload.nombre){alert('El nombre es obligatorio');return;}
-  const q=id?sb.from('clientes').update(payload).eq('id',id):sb.from('clientes').insert(payload);
-  const {error}=await q; if(error){alert(error.message);return;}
-  closeModal(); PAGES.clientes();
+  const payload={
+    nombre:$('c-nombre').value.trim(), cuit_dni:$('c-cuit').value.trim()||null,
+    telefono:$('c-tel').value.trim()||null, email:$('c-email').value.trim()||null,
+    direccion:$('c-dir').value.trim()||null, observaciones:$('c-obs').value.trim()||null
+  };
+  if($('c-act')) payload.activo = $('c-act').value==='true';
+  if(!payload.nombre){ $('c-msg').innerHTML='<div class="msg error">El nombre es obligatorio.</div>'; return; }
+  const q=id? sb.from('clientes').update(payload).eq('id',id) : sb.from('clientes').insert(payload);
+  const {error}=await q;
+  if(error){ $('c-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  closeModal();
+  if(id) cliFicha(id); else PAGES.clientes();
+}
+
+// ---------- ALTA / EDICIÓN DE VEHÍCULO ----------
+let VF_CAT=null; // {id, txt} elegido del catálogo
+function formVehiculoCliente(cliente_id, v){
+  v=v||{};
+  VF_CAT = v.vehiculo_catalogo_id ? {id:v.vehiculo_catalogo_id, txt:v.catalogo_txt||''} : null;
+  openModal(v.id?'Editar vehículo':'Nuevo vehículo',`
+    <div class="row2">
+      <div class="field"><label>Patente</label>
+        <input id="v-pat" value="${v.patente||''}" placeholder="AB123CD" style="text-transform:uppercase"></div>
+      <div class="field"><label>Año</label><input id="v-anio" type="number" value="${v.anio||''}" placeholder="2021"></div>
+    </div>
+    <div class="field"><label>Vincular al catálogo (para sugerir filtros)</label>
+      <input id="v-cat" readonly onclick="vfElegirCatalogo()" style="cursor:pointer;background:var(--panel-2)"
+             value="${(VF_CAT?VF_CAT.txt:'').replace(/"/g,'&quot;')}" placeholder="Elegir del catálogo…">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Opcional, pero permite sugerir los filtros del vehículo.</div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Marca</label><input id="v-marca" value="${(v.marca||'').replace(/"/g,'&quot;')}"></div>
+      <div class="field"><label>Modelo</label><input id="v-modelo" value="${(v.modelo||'').replace(/"/g,'&quot;')}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Motor / versión</label><input id="v-version" value="${(v.version||'').replace(/"/g,'&quot;')}" placeholder="1.4 TSI"></div>
+      <div class="field"><label>Kilometraje</label><input id="v-km" type="number" value="${v.km_actual||''}"></div>
+    </div>
+    <div class="field"><label>Observaciones</label><input id="v-obs" value="${(v.observaciones||'').replace(/"/g,'&quot;')}"></div>
+    <div id="v-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveVehiculo(${cliente_id},${v.id||'null'})">Guardar</button>`);
+}
+
+// Selector de catálogo reutilizando la cascada Tipo → Marca → Modelo
+async function vfElegirCatalogo(){
+  const {data:tipos}=await sb.rpc('cat_tipos');
+  openModal('Elegir del catálogo',`
+    <div class="field"><label>Tipo de vehículo</label>
+      <select id="vf-tipo" onchange="vfMarcas(this.value)">
+        <option value="">Seleccionar tipo…</option>
+        ${(tipos||[]).map(t=>`<option value="${t.tipo}">${t.tipo}</option>`).join('')}
+      </select></div>
+    <div class="field"><label>Marca</label><select id="vf-marca" onchange="vfModelos(this.value)" disabled>
+      <option value="">Seleccionar marca</option></select></div>
+    <div class="field"><label>Modelo</label><select id="vf-modelo" onchange="vfVersiones(this.value)" disabled>
+      <option value="">Seleccionar modelo</option></select></div>
+    <div class="field"><label>Motor / versión</label><select id="vf-version" disabled>
+      <option value="">Todas las versiones</option></select></div>
+    <div style="font-size:11px;color:var(--muted)">Si no sabés la versión exacta, dejá "todas": el sistema igual sugiere los filtros del modelo.</div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="vfConfirmar()">Usar este vehículo</button>`);
+}
+async function vfMarcas(tipo){
+  const s=$('vf-marca'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_marcas',{p_tipo:tipo||null});
+  s.innerHTML='<option value="">Seleccionar marca</option>'+
+    (data||[]).map(m=>`<option value="${m.marca.replace(/"/g,'&quot;')}">${m.marca}</option>`).join('');
+  s.disabled=false;
+  $('vf-modelo').innerHTML='<option value="">Seleccionar modelo</option>'; $('vf-modelo').disabled=true;
+  $('vf-version').innerHTML='<option value="">Todas las versiones</option>'; $('vf-version').disabled=true;
+}
+async function vfModelos(marca){
+  const s=$('vf-modelo'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_modelos',{p_marca:marca,p_tipo:$('vf-tipo').value||null});
+  s.innerHTML='<option value="">Seleccionar modelo</option>'+
+    (data||[]).map(m=>`<option value="${m.modelo.replace(/"/g,'&quot;')}">${m.modelo} (${m.filtros})</option>`).join('');
+  s.disabled=false;
+}
+async function vfVersiones(modelo){
+  const s=$('vf-version'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_versiones',{p_marca:$('vf-marca').value,p_modelo:modelo,p_tipo:$('vf-tipo').value||null});
+  s.innerHTML='<option value="">Todas las versiones</option>'+
+    (data||[]).map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor}</option>`).join('');
+  s.disabled=false;
+}
+async function vfConfirmar(){
+  const marca=$('vf-marca').value, modelo=$('vf-modelo').value, ver=$('vf-version').value;
+  if(!marca||!modelo){ alert('Elegí al menos marca y modelo.'); return; }
+  // resolver la fila del catálogo (si hay versión, la exacta; si no, la primera del modelo)
+  let q=sb.from('vehiculos_catalogo').select('id,marca,modelo,version').ilike('marca',marca).ilike('modelo',modelo);
+  const {data}=await q.limit(50);
+  let row=(data||[])[0]||null;
+  if(ver && data){ const m=data.find(x=>(x.version||'').toLowerCase().includes(ver.toLowerCase())); if(m) row=m; }
+  closeModal();
+  VF_CAT = row ? {id:row.id, txt:[marca,modelo,ver].filter(Boolean).join(' ')} : null;
+  // reabrir el form del vehículo con los datos precargados
+  const cli = CLI_ACTUAL ? CLI_ACTUAL.id : null;
+  formVehiculoCliente(cli, {vehiculo_catalogo_id:VF_CAT?VF_CAT.id:null, catalogo_txt:VF_CAT?VF_CAT.txt:'',
+    marca, modelo, version:ver||''});
+}
+
+async function saveVehiculo(cliente_id, id){
+  const pat=$('v-pat').value.trim().toUpperCase().replace(/\s+/g,'');
+  const payload={
+    cliente_id, patente:pat||null,
+    marca:$('v-marca').value.trim()||null, modelo:$('v-modelo').value.trim()||null,
+    version:$('v-version').value.trim()||null,
+    anio:Number($('v-anio').value)||null, km_actual:Number($('v-km').value)||null,
+    observaciones:$('v-obs').value.trim()||null,
+    vehiculo_catalogo_id: VF_CAT?VF_CAT.id:null
+  };
+  if(!payload.marca && !payload.patente){
+    $('v-msg').innerHTML='<div class="msg error">Cargá al menos la patente o la marca.</div>'; return; }
+  const q=id? sb.from('vehiculos').update(payload).eq('id',id) : sb.from('vehiculos').insert(payload);
+  const {error}=await q;
+  if(error){
+    const m=/duplicate key|ux_vehiculos_patente/i.test(error.message)
+      ? 'Ya existe un vehículo con esa patente.' : error.message;
+    $('v-msg').innerHTML='<div class="msg error">'+m+'</div>'; return;
+  }
+  closeModal(); cliFicha(cliente_id);
+}
+
+// ---------- FICHA DEL VEHÍCULO ----------
+async function vehFicha(id){
+  loading();
+  const {data:vs}=await sb.rpc('cliente_vehiculos',{p_cliente_id: CLI_ACTUAL?CLI_ACTUAL.id:-1});
+  let v=(vs||[]).find(x=>x.id===id);
+  if(!v){ const {data}=await sb.from('vehiculos').select('*').eq('id',id).single(); v=data; }
+  if(!v){ content.innerHTML='<div class="msg error">Vehículo no encontrado.</div>'; return; }
+  VEH_ACTUAL=v;
+  const [{data:hist},{data:filt}]=await Promise.all([
+    sb.rpc('vehiculo_historial',{p_vehiculo_id:id}),
+    sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:id})
+  ]);
+  pageTitle.textContent=(v.patente||'Vehículo');
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="cliFicha(${CLI_ACTUAL?CLI_ACTUAL.id:v.cliente_id})">← Cliente</button>
+    <button class="btn btn-sm" onclick='formVehiculoCliente(${CLI_ACTUAL?CLI_ACTUAL.id:v.cliente_id},${JSON.stringify(v).replace(/'/g,"&#39;")})'>Editar</button>`;
+
+  content.innerHTML=`
+    <div class="veh-card">
+      <div class="veh-card-t">Vehículo</div>
+      <div class="veh-card-n">${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')||'—'}</div>
+      <div class="veh-card-s">
+        <b>${v.patente||'sin patente'}</b>${v.anio?' · '+v.anio:''}
+        · ${v.km_actual?Number(v.km_actual).toLocaleString('es-AR')+' km':'km no registrado'}
+      </div>
+      <button class="btn btn-sm" onclick="vehActualizarKm(${v.id},${v.km_actual||0})">Actualizar km</button>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Filtros para este vehículo</h3>
+        <span style="color:var(--muted);font-size:12px">${(filt||[]).length} sugerido(s)</span></div>
+      <div id="veh-filtros"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Historial</h3></div>
+      <div id="veh-hist"></div>
+    </div>`;
+
+  // filtros sugeridos
+  const fb=$('veh-filtros');
+  if(!filt||!filt.length){
+    fb.innerHTML='<div class="empty" style="padding:24px">Sin filtros cargados para este vehículo.'+
+      (v.vehiculo_catalogo_id?'':'<br><span style="font-size:12px">Vinculalo al catálogo desde "Editar" para obtener sugerencias.</span>')+'</div>';
+  } else {
+    const grupos={};
+    filt.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||[]).push(r); });
+    fb.innerHTML='<div class="filtro-list">'+Object.entries(grupos).map(([t,items])=>
+      items.map(r=>`<div class="filtro-row">
+        <div class="filtro-main">
+          <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
+          ${r.coincide_version?'<span class="tag ok">versión exacta</span>':''}
+          <div class="filtro-desc">${t} · ${r.descripcion||''}</div>
+          <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}</div>
+        </div>
+        <div class="filtro-meta">
+          ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
+          <span class="filtro-precio">${money(r.precio)}</span>
+        </div>
+      </div>`).join('')).join('')+'</div>';
+  }
+
+  // historial
+  const hb=$('veh-hist');
+  if(!hist||!hist.length){
+    hb.innerHTML='<div class="empty" style="padding:24px">Todavía no hay trabajos ni ventas para este vehículo.</div>';
+  } else {
+    hb.innerHTML=`<table><thead><tr><th>Fecha</th><th>Km</th><th>Detalle</th><th>Estado</th><th style="text-align:right">Importe</th></tr></thead>
+      <tbody>${hist.map(h=>`<tr>
+        <td>${h.fecha||'—'}</td>
+        <td>${h.km?Number(h.km).toLocaleString('es-AR'):'—'}</td>
+        <td><span class="tag ${h.origen==='trabajo'?'warn':'ok'}">${h.origen}</span> ${h.detalle||''}</td>
+        <td>${h.estado||'—'}</td>
+        <td style="text-align:right">${h.importe!=null?money(h.importe):'—'}</td>
+      </tr>`).join('')}</tbody></table>`;
+  }
+}
+
+function vehActualizarKm(id, actual){
+  openModal('Actualizar kilometraje',`
+    <div class="field"><label>Km actual</label><input value="${actual||0}" disabled></div>
+    <div class="field"><label>Nuevo kilometraje</label><input id="km-nuevo" type="number" value="${actual||0}"></div>
+    <div id="km-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="saveKm(${id},${actual||0})">Guardar</button>`);
+}
+async function saveKm(id, anterior){
+  const nuevo=Number($('km-nuevo').value)||0;
+  if(nuevo < anterior){
+    $('km-msg').innerHTML='<div class="msg error">El kilometraje no puede ser menor al registrado ('+anterior.toLocaleString('es-AR')+' km).</div>';
+    return;
+  }
+  const {error}=await sb.from('vehiculos').update({km_actual:nuevo}).eq('id',id);
+  if(error){ $('km-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  closeModal(); vehFicha(id);
 }
 
 // ----- PROVEEDORES -----
@@ -1200,8 +1545,8 @@ async function usrGuardar(id){
 
 // ----- BUSCADOR (por vehículo o por código) -----
 let BUSCADOR_MODO='vehiculo';
-const BUS={marca:null,modelo:null,motor:null,anio:null,vista:'ficha'};
-let BUS_MARCAS=null, BUS_MODELOS=[], BUS_VERSIONES=[], BUS_ANIOS=[], BUS_FILTROS=[];
+const BUS={tipo:null,marca:null,modelo:null,motor:null,anio:null,vista:'ficha'};
+let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[], BUS_VERSIONES=[], BUS_ANIOS=[], BUS_FILTROS=[];
 let CART=[];
 
 PAGES.buscador=async ()=>{
@@ -1226,27 +1571,41 @@ function setModo(m){
   if(m==='vehiculo') formVehiculo(); else formCodigo();
 }
 
-// ============ MODO VEHÍCULO: cascada marca > modelo > motor > año ============
+// ============ MODO VEHÍCULO: cascada TIPO > MARCA > MODELO ============
+// (motor y año quedan como refinamiento opcional, después del modelo)
 async function formVehiculo(){
   $('bform').innerHTML=`
-    <div class="bus-grid">
+    <div class="bus-grid3">
       <div class="field" style="margin:0">
-        <label>1. Marca</label>
-        <input id="bus-marca" class="bus-input" placeholder="Escribí una marca…" autocomplete="off"
-               value="${BUS.marca||''}" oninput="busFiltrarMarcas(this.value)" onfocus="busFiltrarMarcas(this.value)">
-        <div class="bus-drop" id="bus-marca-drop"></div>
+        <label>1. Tipo de vehículo</label>
+        <select id="bus-tipo" onchange="busSetTipo(this.value)">
+          <option value="">Cargando…</option>
+        </select>
       </div>
       <div class="field" style="margin:0">
-        <label>2. Modelo</label>
-        <select id="bus-modelo" onchange="busSetModelo(this.value)" ${BUS.marca?'':'disabled'}></select>
+        <label>2. Marca</label>
+        <select id="bus-marca" onchange="busSetMarca(this.value)" disabled>
+          <option value="">Seleccionar marca</option>
+        </select>
       </div>
       <div class="field" style="margin:0">
-        <label>3. Motor / versión</label>
-        <select id="bus-motor" onchange="busSetMotor(this.value)" ${BUS.modelo?'':'disabled'}></select>
+        <label>3. Modelo</label>
+        <select id="bus-modelo" onchange="busSetModelo(this.value)" disabled>
+          <option value="">Seleccionar modelo</option>
+        </select>
       </div>
-      <div class="field" style="margin:0">
-        <label>4. Año</label>
-        <select id="bus-anio" onchange="busSetAnio(this.value)" ${BUS.modelo?'':'disabled'}></select>
+    </div>
+    <div id="bus-refina" style="display:none">
+      <div class="bus-refina-t">Refinar (opcional)</div>
+      <div class="bus-grid2">
+        <div class="field" style="margin:0">
+          <label>Motor / versión</label>
+          <select id="bus-motor" onchange="busSetMotor(this.value)"></select>
+        </div>
+        <div class="field" style="margin:0">
+          <label>Año</label>
+          <select id="bus-anio" onchange="busSetAnio(this.value)"></select>
+        </div>
       </div>
     </div>
     <div class="bus-actions">
@@ -1258,56 +1617,96 @@ async function formVehiculo(){
       </div>
       <button class="btn btn-ghost btn-sm" onclick="busLimpiar()">Limpiar</button>
     </div>`;
-  if(!BUS_MARCAS){
-    const {data}=await sb.rpc('cat_marcas');
-    BUS_MARCAS=data||[];
+
+  if(!BUS_TIPOS){
+    const {data,error}=await sb.rpc('cat_tipos');
+    if(error){ $('bform').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+    BUS_TIPOS=data||[];
   }
-  if(BUS.marca){ await busCargarModelos(); }
+  const st=$('bus-tipo');
+  st.innerHTML='<option value="">Seleccionar tipo de vehículo</option>'+
+    BUS_TIPOS.map(t=>`<option value="${(t.tipo||'').replace(/"/g,'&quot;')}" ${BUS.tipo===t.tipo?'selected':''}>${t.tipo} (${t.filtros})</option>`).join('');
+
+  // si ya había una selección previa, la restauramos
+  if(BUS.tipo){ await busCargarMarcas(); }
   busInfo();
 }
 
-function busFiltrarMarcas(q){
-  const box=$('bus-marca-drop'); if(!box||!BUS_MARCAS) return;
-  const t=(q||'').toLowerCase().trim();
-  const arr=BUS_MARCAS.filter(m=>m.marca.toLowerCase().includes(t)).slice(0,40);
-  if(!arr.length){ box.innerHTML='<div class="bus-opt" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
-  box.innerHTML=arr.map(m=>`<div class="bus-opt" onclick="busSetMarca(${JSON.stringify(m.marca).replace(/"/g,'&quot;')})">
-      <span>${m.marca}</span><span class="bus-badge">${m.filtros} filtros</span></div>`).join('');
-  box.classList.add('show');
-}
-async function busSetMarca(m){
-  BUS.marca=m; BUS.modelo=null; BUS.motor=null; BUS.anio=null;
-  const inp=$('bus-marca'); if(inp) inp.value=m;
-  const box=$('bus-marca-drop'); if(box){ box.classList.remove('show'); box.innerHTML=''; }
-  await busCargarModelos();
-  busBuscar();
-}
-async function busCargarModelos(){
-  const sel=$('bus-modelo'); if(!sel) return;
-  sel.disabled=true; sel.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca});
-  BUS_MODELOS=data||[];
-  sel.innerHTML='<option value="">Todos los modelos</option>'+
-    BUS_MODELOS.map(m=>`<option value="${(m.modelo||'').replace(/"/g,'&quot;')}" ${BUS.modelo===m.modelo?'selected':''}>${m.modelo} (${m.filtros})</option>`).join('');
-  sel.disabled=false;
-  const sm=$('bus-motor'), sa=$('bus-anio');
-  if(sm){ sm.innerHTML='<option value="">Todos los motores</option>'; sm.disabled=!BUS.modelo; }
-  if(sa){ sa.innerHTML='<option value="">Todos los años</option>'; sa.disabled=!BUS.modelo; }
-  if(BUS.modelo) await busCargarVersiones();
+// ---- paso 1: TIPO ----
+async function busSetTipo(v){
+  BUS.tipo = v || null;
+  BUS.marca=null; BUS.modelo=null; BUS.motor=null; BUS.anio=null;
+  BUS_MARCAS=[]; BUS_MODELOS=[]; BUS_VERSIONES=[]; BUS_ANIOS=[]; BUS_FILTROS=[];
+  $('bres').innerHTML='';
+  busResetSelect('bus-modelo','Seleccionar modelo', true);
+  busOcultarRefinar();
+  if(!BUS.tipo){ busResetSelect('bus-marca','Seleccionar marca', true); busInfo(); return; }
+  await busCargarMarcas();
   busInfo();
 }
+
+async function busCargarMarcas(){
+  const sel=$('bus-marca'); if(!sel) return;
+  sel.disabled=true; sel.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_marcas',{p_tipo:BUS.tipo});
+  BUS_MARCAS=data||[];
+  sel.innerHTML='<option value="">Seleccionar marca</option>'+
+    BUS_MARCAS.map(m=>`<option value="${(m.marca||'').replace(/"/g,'&quot;')}" ${BUS.marca===m.marca?'selected':''}>${m.marca} (${m.filtros})</option>`).join('');
+  sel.disabled=false;
+  if(BUS.marca) await busCargarModelos();
+}
+
+// ---- paso 2: MARCA ----
+async function busSetMarca(v){
+  BUS.marca = v || null;
+  BUS.modelo=null; BUS.motor=null; BUS.anio=null;
+  BUS_MODELOS=[]; BUS_VERSIONES=[]; BUS_ANIOS=[]; BUS_FILTROS=[];
+  $('bres').innerHTML='';
+  busOcultarRefinar();
+  if(!BUS.marca){ busResetSelect('bus-modelo','Seleccionar modelo', true); busInfo(); return; }
+  await busCargarModelos();
+  busInfo();
+}
+
+async function busCargarModelos(){
+  const sel=$('bus-modelo'); if(!sel) return;
+  sel.disabled=true; sel.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca,p_tipo:BUS.tipo});
+  BUS_MODELOS=data||[];
+  sel.innerHTML='<option value="">Seleccionar modelo</option>'+
+    '<option value="__TODOS__">— Todos los modelos —</option>'+
+    BUS_MODELOS.map(m=>`<option value="${(m.modelo||'').replace(/"/g,'&quot;')}">${m.modelo} (${m.filtros})</option>`).join('');
+  sel.disabled=false;
+}
+
+// ---- paso 3: MODELO -> resultados ----
 async function busSetModelo(v){
-  BUS.modelo=v||null; BUS.motor=null; BUS.anio=null;
-  if(BUS.modelo){ await busCargarVersiones(); }
-  else { const sm=$('bus-motor'), sa=$('bus-anio');
-         if(sm){sm.innerHTML='<option value="">Todos los motores</option>';sm.disabled=true;}
-         if(sa){sa.innerHTML='<option value="">Todos los años</option>';sa.disabled=true;} }
+  if(!v){ BUS.modelo=null; BUS.motor=null; BUS.anio=null;
+          $('bres').innerHTML=''; busOcultarRefinar(); busInfo(); return; }
+  BUS.modelo = (v==='__TODOS__') ? null : v;
+  BUS._todosModelos = (v==='__TODOS__');
+  BUS.motor=null; BUS.anio=null;
+  if(BUS.modelo){ await busCargarVersiones(); $('bus-refina').style.display=''; }
+  else { busOcultarRefinar(); }
   busInfo(); busBuscar();
 }
+
+function busOcultarRefinar(){
+  const r=$('bus-refina'); if(r) r.style.display='none';
+  busResetSelect('bus-motor','Todos los motores', false);
+  busResetSelect('bus-anio','Todos los años', false);
+}
+function busResetSelect(id, label, disable){
+  const s=$(id); if(!s) return;
+  s.innerHTML='<option value="">'+label+'</option>';
+  if(disable!==undefined) s.disabled=!!disable;
+}
+
+// ---- refinamiento opcional ----
 async function busCargarVersiones(){
   const sm=$('bus-motor'); if(!sm) return;
-  sm.disabled=true; sm.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_versiones',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  sm.disabled=true; sm.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_versiones',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo});
   BUS_VERSIONES=data||[];
   sm.innerHTML='<option value="">Todos los motores</option>'+
     BUS_VERSIONES.map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor} (${v.filtros})</option>`).join('');
@@ -1320,38 +1719,42 @@ async function busSetMotor(v){
 }
 async function busCargarAnios(){
   const sa=$('bus-anio'); if(!sa) return;
-  sa.disabled=true; sa.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_anios',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor});
+  sa.disabled=true; sa.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_anios',
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_tipo:BUS.tipo});
   BUS_ANIOS=data||[];
   sa.innerHTML='<option value="">Todos los años</option>'+
     BUS_ANIOS.map(a=>`<option value="${a.anio}">${a.anio} (${a.filtros})</option>`).join('');
   sa.disabled=false;
 }
 function busSetAnio(v){ BUS.anio=v?Number(v):null; busInfo(); busBuscar(); }
+
 function busVista(v){
   BUS.vista=v;
   const a=$('v-ficha'), b=$('v-tabla');
   if(a&&b){ a.classList.toggle('on',v==='ficha'); b.classList.toggle('on',v==='tabla'); }
-  busBuscar();
+  if(BUS.marca && (BUS.modelo || BUS._todosModelos)) busBuscar();
 }
 function busLimpiar(){
-  BUS.marca=null;BUS.modelo=null;BUS.motor=null;BUS.anio=null;
-  BUS_MODELOS=[];BUS_VERSIONES=[];BUS_ANIOS=[];BUS_FILTROS=[];
+  BUS.tipo=null;BUS.marca=null;BUS.modelo=null;BUS.motor=null;BUS.anio=null;BUS._todosModelos=false;
+  BUS_MARCAS=[];BUS_MODELOS=[];BUS_VERSIONES=[];BUS_ANIOS=[];BUS_FILTROS=[];
   formVehiculo(); $('bres').innerHTML='';
 }
 function busInfo(){
   const el=$('bus-sel'); if(!el) return;
-  if(!BUS.marca){ el.textContent='Elegí una marca para empezar'; return; }
-  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean);
-  el.innerHTML='Vehículo: <b style="color:var(--text)">'+partes.join(' · ')+'</b>';
+  if(!BUS.tipo){ el.textContent='Elegí el tipo de vehículo para empezar'; return; }
+  if(!BUS.marca){ el.textContent='Tipo: '+BUS.tipo+' — elegí una marca'; return; }
+  if(!BUS.modelo && !BUS._todosModelos){ el.textContent=BUS.tipo+' · '+BUS.marca+' — elegí un modelo'; return; }
+  const partes=[BUS.marca, BUS._todosModelos?'todos los modelos':BUS.modelo, BUS.motor, BUS.anio].filter(Boolean);
+  el.innerHTML=BUS.tipo+': <b style="color:var(--text)">'+partes.join(' · ')+'</b>';
 }
 
 async function busBuscar(){
-  if(!BUS.marca) return;
+  if(!BUS.marca || (!BUS.modelo && !BUS._todosModelos)) return;
   if(BUS.vista==='tabla') return busTabla();
   const box=$('bres'); box.innerHTML='<div class="loading">Buscando filtros…</div>';
   const {data,error}=await sb.rpc('cat_filtros',
-    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_anio:BUS.anio});
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_anio:BUS.anio,p_tipo:BUS.tipo});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
   BUS_FILTROS=data||[];
   if(!BUS_FILTROS.length){
@@ -1360,7 +1763,7 @@ async function busBuscar(){
   const grupos={};
   BUS_FILTROS.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
   const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
-  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean).join(' ');
+  const partes=[BUS.marca, BUS._todosModelos?'(todos los modelos)':BUS.modelo, BUS.motor, BUS.anio].filter(Boolean).join(' ');
   box.innerHTML=`
     <div class="veh-card">
       <div class="veh-card-t">Vehículo seleccionado</div>
@@ -1393,7 +1796,7 @@ async function busBuscar(){
 
 async function busTabla(){
   const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
-  const {data,error}=await sb.rpc('cat_tabla',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  const {data,error}=await sb.rpc('cat_tabla',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
   if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">Sin aplicaciones cargadas.</div></div>'; return; }
   const cel=(v)=>v?v.split(', ').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>'):'<span style="color:var(--muted)">—</span>';
