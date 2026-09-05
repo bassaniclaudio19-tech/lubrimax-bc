@@ -139,6 +139,17 @@ tbody tr:hover{background:var(--panel-2)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
 .loading{padding:40px;text-align:center;color:var(--muted)}
+.btab{
+  background:none;color:var(--muted);padding:14px 18px;font-size:14px;font-weight:600;
+  border-bottom:2px solid transparent;font-family:'Barlow Condensed';font-size:17px;letter-spacing:.3px;
+}
+.btab:hover{color:var(--text)}
+.btab.on{color:var(--amber);border-bottom-color:var(--amber)}
+select{
+  width:100%;padding:10px 12px;background:var(--graphite);
+  border:1px solid var(--line);border-radius:var(--radius);color:var(--text);
+}
+select:disabled{opacity:.5}
 @media(max-width:720px){
   .sidebar{width:64px}.brand,.navlink span.lbl,.userbox .u-name,.userbox .u-rol,.logout{display:none}
   .navlink{justify-content:center;padding:12px 0}
@@ -211,6 +222,7 @@ let currentUser = null, currentProfile = null;
 // ============ MENU ============
 const MENU = [
   {id:'panel',      label:'Panel',        ic:'▚'},
+  {id:'buscador',   label:'Buscador',     ic:'⌕'},
   {id:'productos',  label:'Productos y servicios', ic:'▤'},
   {id:'stock',      label:'Stock',        ic:'▣'},
   {id:'compras',    label:'Compras',      ic:'▼'},
@@ -487,6 +499,112 @@ PAGES.usuarios=async ()=>{
   content.innerHTML=tableShell('Usuarios del sistema',['Nombre','Rol','Estado'],rows,
     `<button class="btn btn-ghost btn-sm" onclick="alert('Los nuevos usuarios se registran desde la pantalla de acceso.')">Cómo agregar</button>`);
 };
+
+// ----- BUSCADOR (por vehículo o por código) -----
+let BUSCADOR_MODO='vehiculo';
+PAGES.buscador=async ()=>{
+  content.innerHTML=`
+    <div class="panel" style="margin-bottom:18px">
+      <div style="padding:0 18px;border-bottom:1px solid var(--line);display:flex;gap:2px">
+        <button id="tab-veh" class="btab" onclick="setModo('vehiculo')">Por vehículo</button>
+        <button id="tab-cod" class="btab" onclick="setModo('codigo')">Por código / equivalencia</button>
+      </div>
+      <div style="padding:20px" id="bform"></div>
+    </div>
+    <div id="bres"></div>`;
+  setModo(BUSCADOR_MODO);
+};
+function setModo(m){
+  BUSCADOR_MODO=m;
+  const tv=$('tab-veh'), tc=$('tab-cod');
+  if(tv&&tc){ tv.classList.toggle('on',m==='vehiculo'); tc.classList.toggle('on',m==='codigo'); }
+  $('bres').innerHTML='';
+  if(m==='vehiculo') formVehiculo(); else formCodigo();
+}
+
+// --- Modo vehículo: desplegables encadenados ---
+async function formVehiculo(){
+  $('bform').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
+      <div class="field" style="margin:0"><label>Marca</label>
+        <select id="sel-marca"><option value="">Cargando…</option></select></div>
+      <div class="field" style="margin:0"><label>Modelo</label>
+        <select id="sel-modelo" disabled><option value="">Elegí una marca</option></select></div>
+      <button class="btn" onclick="buscarVehiculo()" style="height:40px">Buscar filtros</button>
+    </div>`;
+  const {data}=await sb.from('vehiculos_catalogo').select('marca').order('marca');
+  const marcas=[...new Set((data||[]).map(x=>x.marca))];
+  $('sel-marca').innerHTML='<option value="">Elegí una marca…</option>'+marcas.map(m=>`<option>${m}</option>`).join('');
+  $('sel-marca').onchange=async e=>{
+    const m=e.target.value, sm=$('sel-modelo');
+    if(!m){ sm.disabled=true; sm.innerHTML='<option value="">Elegí una marca</option>'; return; }
+    sm.disabled=false; sm.innerHTML='<option value="">Cargando…</option>';
+    const {data}=await sb.from('vehiculos_catalogo').select('modelo').eq('marca',m).order('modelo');
+    const mods=[...new Set((data||[]).map(x=>x.modelo))];
+    sm.innerHTML='<option value="">Todos los modelos</option>'+mods.map(x=>`<option>${x}</option>`).join('');
+  };
+}
+async function buscarVehiculo(){
+  const marca=$('sel-marca').value, modelo=$('sel-modelo').value||null;
+  const box=$('bres');
+  if(!marca){ box.innerHTML='<div class="msg error">Elegí una marca para buscar.</div>'; return; }
+  box.innerHTML='<div class="loading">Buscando filtros…</div>';
+  const {data,error}=await sb.rpc('buscar_por_vehiculo',{p_marca:marca,p_modelo:modelo});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para ese vehículo.</div></div>'; return; }
+  const grupos={};
+  data.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
+  const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
+  box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">
+      ${data.length} filtro(s) para <b style="color:var(--text)">${marca}${modelo?' '+modelo:''}</b></div>`+
+    ord.map(([tipo,g])=>`
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-head"><h3>${tipo} <span style="color:var(--muted);font-weight:400;font-size:13px">(${g.items.length})</span></h3></div>
+        <table><thead><tr><th>Código</th><th>Aplicación</th><th>Versión / Año</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th></tr></thead>
+        <tbody>${g.items.map(r=>`<tr>
+          <td style="font-weight:600;white-space:nowrap">${r.codigo}</td>
+          <td style="font-size:12px">${r.aplicacion||''}</td>
+          <td style="color:var(--muted);font-size:12px">${[r.version,r.anio_desde?('desde '+r.anio_desde):''].filter(Boolean).join(' · ')||'—'}</td>
+          <td style="text-align:right">${Number(r.stock)||0}</td>
+          <td style="text-align:right;color:var(--amber);font-weight:600;white-space:nowrap">${money(r.precio)}</td>
+        </tr>`).join('')}</tbody></table>
+      </div>`).join('');
+}
+
+// --- Modo código / equivalencia ---
+function formCodigo(){
+  $('bform').innerHTML=`
+    <div class="field" style="margin:0">
+      <label>Código Wega, OEM, FRAM o MANN</label>
+      <input id="bq" type="text" placeholder="Ej: FAP-0001  ·  C 2678  ·  CA 5737  ·  7701039528" autocomplete="off" style="font-size:15px;padding:12px 14px">
+    </div>
+    <div style="color:var(--muted);font-size:12px;margin-top:8px">
+      Pegá el código que trae el cliente y encontrá el filtro Wega con todas sus equivalencias.
+    </div>`;
+  const inp=$('bq'); inp.focus();
+  let t=null;
+  inp.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(()=>buscarCodigo(inp.value.trim()),300); });
+}
+async function buscarCodigo(q){
+  const box=$('bres');
+  if(!q||q.length<2){ box.innerHTML=''; return; }
+  box.innerHTML='<div class="loading">Buscando…</div>';
+  const {data,error}=await sb.rpc('buscar_por_codigo',{q});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No se encontró ningún filtro con el código "'+q+'".</div></div>'; return; }
+  box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">${data.length} resultado(s)</div>
+    <div class="panel"><table>
+      <thead><tr><th>Código Wega</th><th>Tipo</th><th>Aplicación</th><th>Equivalencias</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th></tr></thead>
+      <tbody>${data.map(r=>`<tr>
+        <td style="font-weight:600;white-space:nowrap">${r.codigo_wega}</td>
+        <td><span class="tag ok">${r.tipo}</span></td>
+        <td style="font-size:12px">${r.aplicacion||''}</td>
+        <td style="color:var(--muted);font-size:12px">${r.equivalencias||'—'}</td>
+        <td style="text-align:right">${Number(r.stock)||0}</td>
+        <td style="text-align:right;color:var(--amber);font-weight:600;white-space:nowrap">${money(r.precio)}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+
 
 // ----- CONFIGURACIÓN -----
 PAGES.config=async ()=>{
