@@ -224,19 +224,24 @@ const MENU = [
 ];
 
 // ============ AUTH ============
+const loginMsg = document.getElementById('loginMsg');
 function msg(el,text,type){el.innerHTML = text?`<div class="msg ${type}">${text}</div>`:''; }
 function showRegister(){document.getElementById('formLogin').style.display='none';document.getElementById('formRegister').style.display='block';msg(loginMsg,'');}
 function showLogin(){document.getElementById('formRegister').style.display='none';document.getElementById('formLogin').style.display='block';msg(loginMsg,'');}
 
 async function doRegister(){
-  const nombre=rg_nombre.value.trim(), email=rg_email.value.trim(), pass=rg_pass.value, rol=rg_rol.value;
+  const nombre=document.getElementById('rg-nombre').value.trim(),
+        email=document.getElementById('rg-email').value.trim(),
+        pass=document.getElementById('rg-pass').value,
+        rol=document.getElementById('rg-rol').value;
   if(!nombre||!email||pass.length<6){msg(loginMsg,'Completá los campos (contraseña mín. 6).','error');return;}
   const {error}=await sb.auth.signUp({email,password:pass,options:{data:{nombre,rol}}});
   if(error){msg(loginMsg,error.message,'error');return;}
   msg(loginMsg,'Cuenta creada. Ya podés ingresar.','ok');showLogin();
 }
 async function doLogin(){
-  const email=li_email.value.trim(), pass=li_pass.value;
+  const email=document.getElementById('li-email').value.trim(),
+        pass=document.getElementById('li-pass').value;
   if(!email||!pass){msg(loginMsg,'Ingresá email y contraseña.','error');return;}
   const {error}=await sb.auth.signInWithPassword({email,password:pass});
   if(error){msg(loginMsg,'Email o contraseña incorrectos.','error');return;}
