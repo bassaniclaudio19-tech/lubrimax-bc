@@ -180,7 +180,12 @@ select:disabled{opacity:.5}
 .picker-list::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 .picker-item{
   padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
 }
+.picker-count{
+  font-size:11px;color:var(--muted);background:var(--panel);padding:1px 7px;border-radius:10px;flex-shrink:0;
+}
+.picker-item.on .picker-count{background:rgba(245,165,36,.2);color:var(--amber)}
 .picker-item:hover{background:var(--panel-2)}
 .picker-item.on{background:rgba(245,165,36,.14);color:var(--amber);font-weight:600}
 .picker-empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:13px}
@@ -596,15 +601,15 @@ async function formVehiculo(){
       <span id="sel-info" style="color:var(--muted);font-size:13px"></span>
     </div>`;
 
-  // cargar marcas (una sola vez)
+  // cargar marcas (una sola vez) - usa RPC para traer TODAS (no limitado a 1000 filas)
   if(!CACHE_MARCAS){
-    const {data}=await sb.from('vehiculos_catalogo').select('marca').order('marca');
-    CACHE_MARCAS=[...new Set((data||[]).map(x=>x.marca))];
+    const {data}=await sb.rpc('listar_marcas');
+    CACHE_MARCAS=(data||[]).map(x=>({marca:x.marca,modelos:x.modelos}));
   }
   pintarMarcas(CACHE_MARCAS);
   $('fm').addEventListener('input',e=>{
     const q=e.target.value.toLowerCase();
-    pintarMarcas(CACHE_MARCAS.filter(m=>m.toLowerCase().includes(q)));
+    pintarMarcas(CACHE_MARCAS.filter(m=>m.marca.toLowerCase().includes(q)));
   });
   $('fmo').addEventListener('input',e=>{
     const q=e.target.value.toLowerCase();
@@ -620,7 +625,8 @@ async function formVehiculo(){
 function pintarMarcas(arr){
   const box=$('lista-marcas'); if(!box) return;
   if(!arr.length){ box.innerHTML='<div class="picker-empty">Sin coincidencias</div>'; return; }
-  box.innerHTML=arr.map(m=>`<div class="picker-item${m===MARCA_SEL?' on':''}" onclick="elegirMarca('${m.replace(/'/g,"\\'")}')">${m}</div>`).join('');
+  box.innerHTML=arr.map(m=>`<div class="picker-item${m.marca===MARCA_SEL?' on':''}" onclick="elegirMarca('${m.marca.replace(/'/g,"\\'")}')">
+      <span>${m.marca}</span><span class="picker-count">${m.modelos}</span></div>`).join('');
 }
 function pintarModelos(arr){
   const box=$('lista-modelos'); if(!box) return;
@@ -631,11 +637,11 @@ function pintarModelos(arr){
 
 async function elegirMarca(m, buscar){
   MARCA_SEL=m; MODELO_SEL=null; CACHE_MODELOS=[];
-  pintarMarcas(CACHE_MARCAS.filter(x=>x.toLowerCase().includes(($('fm')?.value||'').toLowerCase())));
+  pintarMarcas(CACHE_MARCAS.filter(x=>x.marca.toLowerCase().includes(($('fm')?.value||'').toLowerCase())));
   const lm=$('lista-modelos'); lm.innerHTML='<div class="loading" style="padding:20px">Cargando…</div>';
   const fmo=$('fmo'); if(fmo){ fmo.disabled=false; fmo.value=''; }
-  const {data}=await sb.from('vehiculos_catalogo').select('modelo').eq('marca',m).order('modelo');
-  CACHE_MODELOS=[...new Set((data||[]).map(x=>x.modelo))];
+  const {data}=await sb.rpc('listar_modelos',{p_marca:m});
+  CACHE_MODELOS=(data||[]).map(x=>x.modelo);
   pintarModelos(CACHE_MODELOS);
   actualizarInfo();
   if(buscar) buscarVehiculo();
@@ -664,14 +670,12 @@ function actualizarInfo(){
 async function sugerir(q){
   const box=$('vq-hits'); if(!box) return;
   if(!q||q.length<2){ box.innerHTML=''; return; }
-  const ql=q.toLowerCase();
-  const marcas=(CACHE_MARCAS||[]).filter(m=>m.toLowerCase().includes(ql)).slice(0,6);
-  const {data}=await sb.from('vehiculos_catalogo').select('marca,modelo').ilike('modelo','%'+q+'%').limit(200);
-  const vistos=new Set(); const modelos=[];
-  (data||[]).forEach(r=>{ const k=r.marca+'|'+r.modelo; if(!vistos.has(k)){ vistos.add(k); modelos.push(r); } });
+  const {data}=await sb.rpc('sugerir_vehiculos',{q});
+  const marcas=(data||[]).filter(r=>r.es_marca);
+  const modelos=(data||[]).filter(r=>!r.es_marca);
   const items=[
-    ...marcas.map(m=>`<div class="sug" onclick="desdeSugerencia('${m.replace(/'/g,"\\'")}',null)"><span class="tag warn">Marca</span> ${m}</div>`),
-    ...modelos.slice(0,8).map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}','${r.modelo.replace(/'/g,"\\'")}')"><span class="tag ok">Modelo</span> ${r.marca} · <b>${r.modelo}</b></div>`)
+    ...marcas.map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}',null)"><span class="tag warn">Marca</span> ${r.marca}</div>`),
+    ...modelos.map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}','${r.modelo.replace(/'/g,"\\'")}')"><span class="tag ok">Modelo</span> ${r.marca} · <b>${r.modelo}</b></div>`)
   ];
   box.innerHTML = items.length ? '<div class="sug-box">'+items.join('')+'</div>'
     : '<div class="sug-box"><div class="picker-empty">Sin coincidencias para "'+q+'"</div></div>';
