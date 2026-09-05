@@ -221,6 +221,7 @@ const MENU = [
   {id:'clientes',   label:'Clientes',     ic:'◍'},
   {id:'proveedores',label:'Proveedores',  ic:'◐'},
   {id:'usuarios',   label:'Usuarios',     ic:'◯'},
+  {id:'config',     label:'Configuración',ic:'⚙'},
 ];
 
 // ============ AUTH ============
@@ -486,6 +487,46 @@ PAGES.usuarios=async ()=>{
   content.innerHTML=tableShell('Usuarios del sistema',['Nombre','Rol','Estado'],rows,
     `<button class="btn btn-ghost btn-sm" onclick="alert('Los nuevos usuarios se registran desde la pantalla de acceso.')">Cómo agregar</button>`);
 };
+
+// ----- CONFIGURACIÓN -----
+PAGES.config=async ()=>{
+  loading();
+  const {data}=await sb.from('configuracion').select('*').eq('clave','margen_general').single();
+  const margen=data?data.valor:'40';
+  content.innerHTML=`
+    <div class="panel" style="max-width:520px">
+      <div class="panel-head"><h3>Margen de venta</h3></div>
+      <div style="padding:22px">
+        <p style="color:var(--muted);margin-bottom:18px;font-size:13px">
+          El precio de venta de cada producto se calcula como <b>costo + margen</b>.
+          Al guardar un nuevo margen, se recalculan los precios de venta de todo el catálogo.
+        </p>
+        <div class="field"><label>Margen general (%)</label>
+          <input id="cfg-margen" type="number" value="${margen}" min="0" step="1" style="max-width:160px">
+        </div>
+        <div id="cfg-preview" style="color:var(--muted);font-size:13px;margin:8px 0 18px"></div>
+        <button class="btn" onclick="guardarMargen()">Guardar y recalcular precios</button>
+        <div id="cfg-msg" style="margin-top:14px"></div>
+      </div>
+    </div>`;
+  const inp=$('cfg-margen'), prev=$('cfg-preview');
+  const upd=()=>{ const m=Number(inp.value)||0; const ej=Math.round(14562*(1+m/100));
+    prev.innerHTML=`Ejemplo: un filtro con costo ${money(14562)} se vendería a <b style="color:var(--amber)">${money(ej)}</b>`; };
+  inp.addEventListener('input',upd); upd();
+};
+async function guardarMargen(){
+  const m=Number($('cfg-margen').value);
+  const msg=$('cfg-msg');
+  if(isNaN(m)||m<0){ msg.innerHTML='<div class="msg error">Ingresá un margen válido (0 o más).</div>'; return; }
+  msg.innerHTML='<div style="color:var(--muted);font-size:13px">Recalculando precios de todo el catálogo…</div>';
+  // guardar el margen
+  await sb.from('configuracion').update({valor:String(m),actualizado_en:new Date().toISOString()}).eq('clave','margen_general');
+  // recalcular precios: precio_venta = round(costo * (1+m/100)) para todos los productos
+  const factor=1+m/100;
+  const {error}=await sb.rpc('recalcular_precios',{factor});
+  if(error){ msg.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  msg.innerHTML='<div class="msg ok">Listo. Precios actualizados con un margen del '+m+'%.</div>';
+}
 
 // cerrar modal al click fuera
 overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal();});
