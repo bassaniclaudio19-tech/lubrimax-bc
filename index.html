@@ -235,6 +235,72 @@ select:disabled{opacity:.5}
   .sidebar{width:64px}.brand,.navlink span.lbl,.userbox .u-name,.userbox .u-rol,.logout{display:none}
   .navlink{justify-content:center;padding:12px 0}
 }
+
+/* ---- BUSCADOR v2: cascada, ficha, tabla, carrito ---- */
+.bus-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.bus-input{width:100%;padding:10px 12px;background:var(--graphite);border:1px solid var(--line);
+  border-radius:var(--radius);color:var(--text)}
+.bus-input:focus{outline:none;border-color:var(--amber)}
+.bus-drop{position:relative}
+.bus-drop.show::before{content:'';display:block}
+.bus-drop{display:none}
+.bus-drop.show{display:block;position:absolute;z-index:30;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:var(--radius);margin-top:2px;
+  max-height:280px;overflow-y:auto;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.bus-opt{padding:9px 13px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;
+  gap:12px;border-bottom:1px solid rgba(54,60,71,.5);white-space:nowrap}
+.bus-opt:last-child{border-bottom:none}
+.bus-opt:hover{background:var(--panel)}
+.bus-badge{font-size:11px;color:var(--muted);background:var(--panel);padding:1px 7px;border-radius:10px}
+.bus-actions{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.bus-sel{color:var(--muted);font-size:13px}
+
+.veh-card{background:linear-gradient(135deg,var(--panel-2),var(--panel));border:1px solid var(--line);
+  border-left:3px solid var(--amber);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.veh-card-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);width:100%}
+.veh-card-n{font-family:'Barlow Condensed';font-size:24px;font-weight:700}
+.veh-card-s{color:var(--muted);font-size:13px;flex:1}
+
+.filtro-list{display:flex;flex-direction:column}
+.filtro-row{display:flex;align-items:center;gap:14px;padding:12px 18px;
+  border-bottom:1px solid var(--line);flex-wrap:wrap}
+.filtro-row:last-child{border-bottom:none}
+.filtro-row:hover{background:var(--panel-2)}
+.filtro-main{flex:1;min-width:200px}
+.filtro-cod{font-weight:700;color:var(--amber);cursor:pointer;font-size:14px;text-decoration:none}
+.filtro-cod:hover{text-decoration:underline}
+.filtro-desc{font-size:12px;color:var(--text);margin-top:2px}
+.filtro-apl{font-size:11px;color:var(--muted);margin-top:3px}
+.filtro-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.filtro-ubi{font-size:11px;color:var(--muted);border:1px dashed var(--line);padding:1px 7px;border-radius:4px}
+.filtro-precio{font-family:'Barlow Condensed';font-size:19px;font-weight:700;color:var(--amber);
+  min-width:90px;text-align:right}
+
+.tabla-wrap{overflow-x:auto}
+.cat-tabla{width:100%;border-collapse:collapse;font-size:12px}
+.cat-tabla th{padding:9px 12px;white-space:nowrap}
+.cat-tabla td{padding:9px 12px;vertical-align:top;border-bottom:1px solid var(--line)}
+
+.cart-bar{position:sticky;bottom:0;margin-top:18px;background:var(--panel-2);
+  border:1px solid var(--amber-dim);border-radius:var(--radius);padding:12px 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  box-shadow:0 -4px 18px rgba(0,0,0,.35);z-index:20}
+
+@media(max-width:860px){
+  .bus-grid{grid-template-columns:1fr}
+  .filtro-row{align-items:flex-start}
+  .filtro-meta{width:100%;justify-content:space-between}
+  .filtro-precio{text-align:left}
+  /* tabla -> tarjetas */
+  .cat-tabla thead{display:none}
+  .cat-tabla tr{display:block;border:1px solid var(--line);border-radius:var(--radius);
+    margin-bottom:10px;padding:6px 0;background:var(--graphite)}
+  .cat-tabla td{display:flex;justify-content:space-between;gap:14px;border:none;
+    padding:6px 14px;text-align:right}
+  .cat-tabla td::before{content:attr(data-l);color:var(--muted);font-size:11px;
+    text-transform:uppercase;letter-spacing:.4px;text-align:left;flex-shrink:0}
+}
 </style>
 </head>
 <body>
@@ -257,7 +323,6 @@ select:disabled{opacity:.5}
       <div class="field"><label>Nombre</label><input id="rg-nombre" type="text" placeholder="Juan Pérez"></div>
       <div class="field"><label>Email</label><input id="rg-email" type="email" placeholder="usuario@lubrimax.com"></div>
       <div class="field"><label>Contraseña</label><input id="rg-pass" type="password" placeholder="mínimo 6 caracteres"></div>
-      <div class="field"><label>Rol</label><select id="rg-rol"><option value="empleado">Empleado</option><option value="admin">Administrador</option></select></div>
       <button class="btn-primary" onclick="doRegister()">Crear cuenta</button>
       <div class="login-switch">¿Ya tenés cuenta? <a onclick="showLogin()">Ingresá</a></div>
     </div>
@@ -326,12 +391,14 @@ function showLogin(){document.getElementById('formRegister').style.display='none
 async function doRegister(){
   const nombre=document.getElementById('rg-nombre').value.trim(),
         email=document.getElementById('rg-email').value.trim(),
-        pass=document.getElementById('rg-pass').value,
-        rol=document.getElementById('rg-rol').value;
+        pass=document.getElementById('rg-pass').value;
   if(!nombre||!email||pass.length<6){msg(loginMsg,'Completá los campos (contraseña mín. 6).','error');return;}
-  const {error}=await sb.auth.signUp({email,password:pass,options:{data:{nombre,rol}}});
+  // El rol no se elige acá: el sistema asigna 'empleado'
+  // (o 'admin' automáticamente al primer usuario del sistema).
+  const {error}=await sb.auth.signUp({email,password:pass,options:{data:{nombre}}});
   if(error){msg(loginMsg,error.message,'error');return;}
-  msg(loginMsg,'Cuenta creada. Ya podés ingresar.','ok');showLogin();
+  msg(loginMsg,'Cuenta creada. Ya podés ingresar. Un administrador te asignará permisos.','ok');
+  showLogin();
 }
 async function doLogin(){
   const email=document.getElementById('li-email').value.trim(),
@@ -375,6 +442,7 @@ function go(id){
 // ============ HELPERS ============
 const $=(id)=>document.getElementById(id);
 const money=(n)=>'$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esAdmin=()=>!!(currentProfile && currentProfile.rol==='admin');
 function loading(){content.innerHTML='<div class="loading">Cargando…</div>';}
 function tableShell(title,cols,rowsHtml,addBtn){
   return `<div class="panel"><div class="panel-head"><h3>${title}</h3>${addBtn||''}</div>
@@ -464,7 +532,7 @@ PAGES.stock=async ()=>{
     const bajo=Number(p.stock)<=Number(p.stock_minimo);
     return `<tr><td>${p.nombre}</td><td>${p.stock} ${p.unidad||''}</td><td>${p.stock_minimo}</td>
       <td>${bajo?'<span class="tag pend">Reponer</span>':'<span class="tag ok">OK</span>'}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick='ajusteStock(${JSON.stringify(p)})'>Ajustar</button></td></tr>`;
+      <td>${esAdmin()?`<button class="btn btn-ghost btn-sm" onclick='ajusteStock(${JSON.stringify(p)})'>Ajustar</button>`:'—'}</td></tr>`;
   }).join('');
   content.innerHTML=tableShell('Existencias',['Producto','Stock','Mínimo','Estado',''],rows);
 };
@@ -477,8 +545,18 @@ function ajusteStock(p){
 }
 async function saveAjuste(id,anterior){
   const nuevo=+$('f-nuevo').value, motivo=$('f-motivo').value.trim();
-  await sb.from('productos').update({stock:nuevo}).eq('id',id);
-  await sb.from('movimientos_stock').insert({producto_id:id,tipo:'ajuste',cantidad:nuevo-anterior,motivo:motivo||'Ajuste manual'});
+  if(isNaN(nuevo)||nuevo<0){ alert('El stock no puede ser negativo.'); return; }
+  // Ajuste transaccional en el servidor: actualiza el stock y deja el
+  // movimiento en el libro mayor. Solo admin (validado en Supabase).
+  const {error}=await sb.rpc('ajustar_stock',{
+    p_producto_id:id, p_nuevo_stock:nuevo, p_motivo:motivo||null
+  });
+  if(error){
+    alert(/administrador/i.test(error.message)
+      ? 'Solo un administrador puede ajustar stock.'
+      : 'No se pudo ajustar: '+error.message);
+    return;
+  }
   closeModal(); PAGES.stock();
 }
 
@@ -1079,15 +1157,52 @@ PAGES.cobranzas=async ()=>{
 PAGES.usuarios=async ()=>{
   loading();
   const {data}=await sb.from('perfiles').select('*').order('creado_en');
-  const rows=(data||[]).map(u=>`<tr><td>${u.nombre}</td><td><span class="tag ${u.rol==='admin'?'warn':'ok'}">${u.rol}</span></td>
-    <td>${u.activo?'<span class="tag ok">Activo</span>':'<span class="tag pend">Inactivo</span>'}</td></tr>`).join('');
-  content.innerHTML=tableShell('Usuarios del sistema',['Nombre','Rol','Estado'],rows,
-    `<button class="btn btn-ghost btn-sm" onclick="alert('Los nuevos usuarios se registran desde la pantalla de acceso.')">Cómo agregar</button>`);
+  const rows=(data||[]).map(u=>{
+    const rolTag=`<span class="tag ${u.rol==='admin'?'warn':'ok'}">${u.rol}</span>`;
+    const estTag=u.activo?'<span class="tag ok">Activo</span>':'<span class="tag pend">Inactivo</span>';
+    const acc = esAdmin()
+      ? `<button class="btn btn-ghost btn-sm" onclick='usrEditar(${JSON.stringify(u)})'>Gestionar</button>`
+      : '—';
+    return `<tr><td>${u.nombre}</td><td>${rolTag}</td><td>${estTag}</td><td>${acc}</td></tr>`;
+  }).join('');
+  content.innerHTML=tableShell('Usuarios del sistema',['Nombre','Rol','Estado',''],rows)+
+    (esAdmin()?'':'<div style="color:var(--muted);font-size:12px;margin-top:12px">Solo un administrador puede cambiar roles o desactivar usuarios.</div>');
 };
+
+function usrEditar(u){
+  openModal('Gestionar — '+u.nombre,`
+    <div class="field"><label>Rol</label>
+      <select id="usr-rol">
+        <option value="empleado" ${u.rol==='empleado'?'selected':''}>Empleado</option>
+        <option value="admin" ${u.rol==='admin'?'selected':''}>Administrador</option>
+      </select></div>
+    <div class="field"><label>Estado</label>
+      <select id="usr-activo">
+        <option value="true" ${u.activo?'selected':''}>Activo</option>
+        <option value="false" ${!u.activo?'selected':''}>Inactivo</option>
+      </select></div>
+    <div id="usr-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="usrGuardar('${u.id}')">Guardar</button>`);
+}
+
+async function usrGuardar(id){
+  const rol=$('usr-rol').value, activo=$('usr-activo').value==='true';
+  const {error}=await sb.rpc('admin_set_usuario',{p_perfil_id:id,p_rol:rol,p_activo:activo});
+  if(error){
+    let m=error.message||'Error';
+    if(/sin ning/i.test(m)) m='No podés dejar el sistema sin ningún administrador activo.';
+    else if(/administrador/i.test(m)) m='Solo un administrador puede hacer este cambio.';
+    $('usr-msg').innerHTML=`<div class="msg error">${m}</div>`; return;
+  }
+  closeModal(); PAGES.usuarios();
+}
 
 // ----- BUSCADOR (por vehículo o por código) -----
 let BUSCADOR_MODO='vehiculo';
-let CACHE_MARCAS=null, MARCA_SEL=null, MODELO_SEL=null, CACHE_MODELOS=[];
+const BUS={marca:null,modelo:null,motor:null,anio:null,vista:'ficha'};
+let BUS_MARCAS=null, BUS_MODELOS=[], BUS_VERSIONES=[], BUS_ANIOS=[], BUS_FILTROS=[];
+let CART=[];
 
 PAGES.buscador=async ()=>{
   content.innerHTML=`
@@ -1098,8 +1213,10 @@ PAGES.buscador=async ()=>{
       </div>
       <div style="padding:20px" id="bform"></div>
     </div>
-    <div id="bres"></div>`;
+    <div id="bres"></div>
+    <div id="cart-bar"></div>`;
   setModo(BUSCADOR_MODO);
+  renderCart();
 };
 function setModo(m){
   BUSCADOR_MODO=m;
@@ -1109,145 +1226,349 @@ function setModo(m){
   if(m==='vehiculo') formVehiculo(); else formCodigo();
 }
 
-// ============ MODO VEHÍCULO ============
+// ============ MODO VEHÍCULO: cascada marca > modelo > motor > año ============
 async function formVehiculo(){
   $('bform').innerHTML=`
-    <div class="field" style="margin-bottom:16px">
-      <label>Buscar marca o modelo</label>
-      <input id="vq" type="text" placeholder="Escribí: Toyota, Hilux, Gol, Focus…" autocomplete="off" style="font-size:15px;padding:12px 14px">
-      <div id="vq-hits"></div>
-    </div>
-    <div class="picker-grid">
-      <div>
-        <div class="picker-head">
-          <span>Marca</span>
-          <input id="fm" class="picker-filter" placeholder="Filtrar marcas…" autocomplete="off">
-        </div>
-        <div id="lista-marcas" class="picker-list"><div class="loading" style="padding:20px">Cargando…</div></div>
+    <div class="bus-grid">
+      <div class="field" style="margin:0">
+        <label>1. Marca</label>
+        <input id="bus-marca" class="bus-input" placeholder="Escribí una marca…" autocomplete="off"
+               value="${BUS.marca||''}" oninput="busFiltrarMarcas(this.value)" onfocus="busFiltrarMarcas(this.value)">
+        <div class="bus-drop" id="bus-marca-drop"></div>
       </div>
-      <div>
-        <div class="picker-head">
-          <span>Modelo</span>
-          <input id="fmo" class="picker-filter" placeholder="Filtrar modelos…" autocomplete="off" disabled>
-        </div>
-        <div id="lista-modelos" class="picker-list"><div class="picker-empty">Elegí una marca</div></div>
+      <div class="field" style="margin:0">
+        <label>2. Modelo</label>
+        <select id="bus-modelo" onchange="busSetModelo(this.value)" ${BUS.marca?'':'disabled'}></select>
+      </div>
+      <div class="field" style="margin:0">
+        <label>3. Motor / versión</label>
+        <select id="bus-motor" onchange="busSetMotor(this.value)" ${BUS.modelo?'':'disabled'}></select>
+      </div>
+      <div class="field" style="margin:0">
+        <label>4. Año</label>
+        <select id="bus-anio" onchange="busSetAnio(this.value)" ${BUS.modelo?'':'disabled'}></select>
       </div>
     </div>
-    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn" onclick="buscarVehiculo()">Buscar filtros</button>
-      <button class="btn btn-ghost" onclick="limpiarSeleccion()">Limpiar</button>
-      <span id="sel-info" style="color:var(--muted);font-size:13px"></span>
+    <div class="bus-actions">
+      <span id="bus-sel" class="bus-sel"></span>
+      <span style="flex:1"></span>
+      <div class="cmp-toggle" style="width:200px">
+        <button id="v-ficha" class="${BUS.vista==='ficha'?'on':''}" onclick="busVista('ficha')">Ficha</button>
+        <button id="v-tabla" class="${BUS.vista==='tabla'?'on':''}" onclick="busVista('tabla')">Tabla</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="busLimpiar()">Limpiar</button>
     </div>`;
-
-  // cargar marcas (una sola vez) - usa RPC para traer TODAS (no limitado a 1000 filas)
-  if(!CACHE_MARCAS){
-    const {data}=await sb.rpc('listar_marcas');
-    CACHE_MARCAS=(data||[]).map(x=>({marca:x.marca,modelos:x.modelos}));
+  if(!BUS_MARCAS){
+    const {data}=await sb.rpc('cat_marcas');
+    BUS_MARCAS=data||[];
   }
-  pintarMarcas(CACHE_MARCAS);
-  $('fm').addEventListener('input',e=>{
-    const q=e.target.value.toLowerCase();
-    pintarMarcas(CACHE_MARCAS.filter(m=>m.marca.toLowerCase().includes(q)));
-  });
-  $('fmo').addEventListener('input',e=>{
-    const q=e.target.value.toLowerCase();
-    pintarModelos(CACHE_MODELOS.filter(m=>m.toLowerCase().includes(q)));
-  });
-  // autocompletado global (marca o modelo)
-  const vq=$('vq'); let t=null;
-  vq.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(()=>sugerir(vq.value.trim()),250); });
-  vq.focus();
-  actualizarInfo();
+  if(BUS.marca){ await busCargarModelos(); }
+  busInfo();
 }
 
-function pintarMarcas(arr){
-  const box=$('lista-marcas'); if(!box) return;
-  if(!arr.length){ box.innerHTML='<div class="picker-empty">Sin coincidencias</div>'; return; }
-  box.innerHTML=arr.map(m=>`<div class="picker-item${m.marca===MARCA_SEL?' on':''}" onclick="elegirMarca('${m.marca.replace(/'/g,"\\'")}')">
-      <span>${m.marca}</span><span class="picker-count">${m.modelos}</span></div>`).join('');
+function busFiltrarMarcas(q){
+  const box=$('bus-marca-drop'); if(!box||!BUS_MARCAS) return;
+  const t=(q||'').toLowerCase().trim();
+  const arr=BUS_MARCAS.filter(m=>m.marca.toLowerCase().includes(t)).slice(0,40);
+  if(!arr.length){ box.innerHTML='<div class="bus-opt" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
+  box.innerHTML=arr.map(m=>`<div class="bus-opt" onclick="busSetMarca(${JSON.stringify(m.marca).replace(/"/g,'&quot;')})">
+      <span>${m.marca}</span><span class="bus-badge">${m.filtros} filtros</span></div>`).join('');
+  box.classList.add('show');
 }
-function pintarModelos(arr){
-  const box=$('lista-modelos'); if(!box) return;
-  if(!arr.length){ box.innerHTML='<div class="picker-empty">Sin coincidencias</div>'; return; }
-  box.innerHTML='<div class="picker-item'+(MODELO_SEL===null?' on':'')+'" onclick="elegirModelo(null)"><i>Todos los modelos</i></div>'+
-    arr.map(m=>`<div class="picker-item${m===MODELO_SEL?' on':''}" onclick="elegirModelo('${m.replace(/'/g,"\\'")}')">${m}</div>`).join('');
+async function busSetMarca(m){
+  BUS.marca=m; BUS.modelo=null; BUS.motor=null; BUS.anio=null;
+  const inp=$('bus-marca'); if(inp) inp.value=m;
+  const box=$('bus-marca-drop'); if(box){ box.classList.remove('show'); box.innerHTML=''; }
+  await busCargarModelos();
+  busBuscar();
+}
+async function busCargarModelos(){
+  const sel=$('bus-modelo'); if(!sel) return;
+  sel.disabled=true; sel.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca});
+  BUS_MODELOS=data||[];
+  sel.innerHTML='<option value="">Todos los modelos</option>'+
+    BUS_MODELOS.map(m=>`<option value="${(m.modelo||'').replace(/"/g,'&quot;')}" ${BUS.modelo===m.modelo?'selected':''}>${m.modelo} (${m.filtros})</option>`).join('');
+  sel.disabled=false;
+  const sm=$('bus-motor'), sa=$('bus-anio');
+  if(sm){ sm.innerHTML='<option value="">Todos los motores</option>'; sm.disabled=!BUS.modelo; }
+  if(sa){ sa.innerHTML='<option value="">Todos los años</option>'; sa.disabled=!BUS.modelo; }
+  if(BUS.modelo) await busCargarVersiones();
+  busInfo();
+}
+async function busSetModelo(v){
+  BUS.modelo=v||null; BUS.motor=null; BUS.anio=null;
+  if(BUS.modelo){ await busCargarVersiones(); }
+  else { const sm=$('bus-motor'), sa=$('bus-anio');
+         if(sm){sm.innerHTML='<option value="">Todos los motores</option>';sm.disabled=true;}
+         if(sa){sa.innerHTML='<option value="">Todos los años</option>';sa.disabled=true;} }
+  busInfo(); busBuscar();
+}
+async function busCargarVersiones(){
+  const sm=$('bus-motor'); if(!sm) return;
+  sm.disabled=true; sm.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_versiones',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  BUS_VERSIONES=data||[];
+  sm.innerHTML='<option value="">Todos los motores</option>'+
+    BUS_VERSIONES.map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor} (${v.filtros})</option>`).join('');
+  sm.disabled=false;
+  await busCargarAnios();
+}
+async function busSetMotor(v){
+  BUS.motor=v||null; BUS.anio=null;
+  await busCargarAnios(); busInfo(); busBuscar();
+}
+async function busCargarAnios(){
+  const sa=$('bus-anio'); if(!sa) return;
+  sa.disabled=true; sa.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_anios',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor});
+  BUS_ANIOS=data||[];
+  sa.innerHTML='<option value="">Todos los años</option>'+
+    BUS_ANIOS.map(a=>`<option value="${a.anio}">${a.anio} (${a.filtros})</option>`).join('');
+  sa.disabled=false;
+}
+function busSetAnio(v){ BUS.anio=v?Number(v):null; busInfo(); busBuscar(); }
+function busVista(v){
+  BUS.vista=v;
+  const a=$('v-ficha'), b=$('v-tabla');
+  if(a&&b){ a.classList.toggle('on',v==='ficha'); b.classList.toggle('on',v==='tabla'); }
+  busBuscar();
+}
+function busLimpiar(){
+  BUS.marca=null;BUS.modelo=null;BUS.motor=null;BUS.anio=null;
+  BUS_MODELOS=[];BUS_VERSIONES=[];BUS_ANIOS=[];BUS_FILTROS=[];
+  formVehiculo(); $('bres').innerHTML='';
+}
+function busInfo(){
+  const el=$('bus-sel'); if(!el) return;
+  if(!BUS.marca){ el.textContent='Elegí una marca para empezar'; return; }
+  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean);
+  el.innerHTML='Vehículo: <b style="color:var(--text)">'+partes.join(' · ')+'</b>';
 }
 
-async function elegirMarca(m, buscar){
-  MARCA_SEL=m; MODELO_SEL=null; CACHE_MODELOS=[];
-  pintarMarcas(CACHE_MARCAS.filter(x=>x.marca.toLowerCase().includes(($('fm')?.value||'').toLowerCase())));
-  const lm=$('lista-modelos'); lm.innerHTML='<div class="loading" style="padding:20px">Cargando…</div>';
-  const fmo=$('fmo'); if(fmo){ fmo.disabled=false; fmo.value=''; }
-  const {data}=await sb.rpc('listar_modelos',{p_marca:m});
-  CACHE_MODELOS=(data||[]).map(x=>x.modelo);
-  pintarModelos(CACHE_MODELOS);
-  actualizarInfo();
-  if(buscar) buscarVehiculo();
-}
-function elegirModelo(m){
-  MODELO_SEL=m;
-  pintarModelos(CACHE_MODELOS.filter(x=>x.toLowerCase().includes(($('fmo')?.value||'').toLowerCase())));
-  actualizarInfo();
-  buscarVehiculo();
-}
-function limpiarSeleccion(){
-  MARCA_SEL=null; MODELO_SEL=null; CACHE_MODELOS=[];
-  const fm=$('fm'), fmo=$('fmo'), vq=$('vq');
-  if(fm) fm.value=''; if(fmo){ fmo.value=''; fmo.disabled=true; } if(vq) vq.value='';
-  $('vq-hits').innerHTML='';
-  pintarMarcas(CACHE_MARCAS||[]);
-  $('lista-modelos').innerHTML='<div class="picker-empty">Elegí una marca</div>';
-  $('bres').innerHTML=''; actualizarInfo();
-}
-function actualizarInfo(){
-  const el=$('sel-info'); if(!el) return;
-  el.innerHTML = MARCA_SEL ? `Seleccionado: <b style="color:var(--text)">${MARCA_SEL}${MODELO_SEL?' · '+MODELO_SEL:' · todos los modelos'}</b>` : 'Ninguna marca seleccionada';
-}
-
-// autocompletado: sugiere marcas y modelos que coincidan
-async function sugerir(q){
-  const box=$('vq-hits'); if(!box) return;
-  if(!q||q.length<2){ box.innerHTML=''; return; }
-  const {data}=await sb.rpc('sugerir_vehiculos',{q});
-  const marcas=(data||[]).filter(r=>r.es_marca);
-  const modelos=(data||[]).filter(r=>!r.es_marca);
-  const items=[
-    ...marcas.map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}',null)"><span class="tag warn">Marca</span> ${r.marca}</div>`),
-    ...modelos.map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}','${r.modelo.replace(/'/g,"\\'")}')"><span class="tag ok">Modelo</span> ${r.marca} · <b>${r.modelo}</b></div>`)
-  ];
-  box.innerHTML = items.length ? '<div class="sug-box">'+items.join('')+'</div>'
-    : '<div class="sug-box"><div class="picker-empty">Sin coincidencias para "'+q+'"</div></div>';
-}
-async function desdeSugerencia(marca, modelo){
-  $('vq-hits').innerHTML=''; $('vq').value = modelo? (marca+' '+modelo) : marca;
-  await elegirMarca(marca, !modelo);
-  if(modelo){ MODELO_SEL=modelo; pintarModelos(CACHE_MODELOS); actualizarInfo(); buscarVehiculo(); }
-}
-
-async function buscarVehiculo(){
-  const box=$('bres');
-  if(!MARCA_SEL){ box.innerHTML='<div class="msg error">Elegí una marca de la lista o buscala arriba.</div>'; return; }
-  box.innerHTML='<div class="loading">Buscando filtros…</div>';
-  const {data,error}=await sb.rpc('buscar_por_vehiculo',{p_marca:MARCA_SEL,p_modelo:MODELO_SEL});
+async function busBuscar(){
+  if(!BUS.marca) return;
+  if(BUS.vista==='tabla') return busTabla();
+  const box=$('bres'); box.innerHTML='<div class="loading">Buscando filtros…</div>';
+  const {data,error}=await sb.rpc('cat_filtros',
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_anio:BUS.anio});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para ese vehículo.</div></div>'; return; }
+  BUS_FILTROS=data||[];
+  if(!BUS_FILTROS.length){
+    box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para esa combinación.<br>'+
+      '<span style="font-size:12px">Probá quitando el año o el motor para ampliar la búsqueda.</span></div></div>'; return; }
   const grupos={};
-  data.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
+  BUS_FILTROS.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
   const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
-  box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">
-      ${data.length} filtro(s) para <b style="color:var(--text)">${MARCA_SEL}${MODELO_SEL?' '+MODELO_SEL:''}</b></div>`+
+  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean).join(' ');
+  box.innerHTML=`
+    <div class="veh-card">
+      <div class="veh-card-t">Vehículo seleccionado</div>
+      <div class="veh-card-n">${partes}</div>
+      <div class="veh-card-s">${BUS_FILTROS.length} producto(s) aplicable(s)</div>
+      <button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar todos</button>
+    </div>`+
     ord.map(([tipo,g])=>`
-      <div class="panel" style="margin-bottom:16px">
+      <div class="panel" style="margin-bottom:14px">
         <div class="panel-head"><h3>${tipo} <span style="color:var(--muted);font-weight:400;font-size:13px">(${g.items.length})</span></h3></div>
-        <table><thead><tr><th>Código</th><th>Aplicación</th><th>Versión / Año</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th></tr></thead>
-        <tbody>${g.items.map(r=>`<tr>
-          <td style="font-weight:600;white-space:nowrap">${r.codigo}</td>
-          <td style="font-size:12px">${r.aplicacion||''}</td>
-          <td style="color:var(--muted);font-size:12px">${[r.version,r.anio_desde?('desde '+r.anio_desde):''].filter(Boolean).join(' · ')||'—'}</td>
-          <td style="text-align:right">${Number(r.stock)||0}</td>
-          <td style="text-align:right;color:var(--amber);font-weight:600;white-space:nowrap">${money(r.precio)}</td>
-        </tr>`).join('')}</tbody></table>
+        <div class="filtro-list">
+        ${g.items.map(r=>`
+          <div class="filtro-row">
+            <div class="filtro-main">
+              <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
+              <div class="filtro-desc">${r.descripcion||''}</div>
+              <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}${r.anio_incierto?' <span class="tag warn">año no especificado</span>':''}</div>
+            </div>
+            <div class="filtro-meta">
+              ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
+              ${r.ubicacion?`<span class="filtro-ubi">${r.ubicacion}</span>`:''}
+              <span class="filtro-precio">${money(r.precio)}</span>
+              <button class="btn btn-sm" onclick='cartAdd(${JSON.stringify(r).replace(/'/g,"&#39;")})'>Agregar</button>
+            </div>
+          </div>`).join('')}
+        </div>
       </div>`).join('');
+  renderCart();
+}
+
+async function busTabla(){
+  const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
+  const {data,error}=await sb.rpc('cat_tabla',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">Sin aplicaciones cargadas.</div></div>'; return; }
+  const cel=(v)=>v?v.split(', ').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>'):'<span style="color:var(--muted)">—</span>';
+  box.innerHTML=`<div class="panel">
+    <div class="panel-head"><h3>Catálogo — ${BUS.marca}${BUS.modelo?' '+BUS.modelo:''}</h3>
+      <span style="color:var(--muted);font-size:12px">${data.length} aplicaciones</span></div>
+    <div class="tabla-wrap">
+    <table class="cat-tabla">
+      <thead><tr><th>Modelo</th><th>Motor</th><th>Año</th><th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th><th>Otros</th></tr></thead>
+      <tbody>${data.map(r=>`<tr>
+        <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
+        <td data-l="Motor">${r.motor||'—'}</td>
+        <td data-l="Año">${r.anio||'—'}</td>
+        <td data-l="Aire">${cel(r.aire)}</td>
+        <td data-l="Aceite">${cel(r.aceite)}</td>
+        <td data-l="Combustible">${cel(r.combustible)}</td>
+        <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
+        <td data-l="Otros">${cel(r.otros)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// ---- detalle de producto ----
+async function verProducto(id){
+  const {data:p}=await sb.from('productos')
+    .select('id,codigo,nombre,descripcion,precio_venta,stock,stock_minimo,unidad,ubicacion,tipo_filtro_id').eq('id',id).single();
+  if(!p) return;
+  const {data:eq}=await sb.from('equivalencias').select('marca_id,codigo').eq('producto_id',id).limit(20);
+  openModal(p.codigo||'Producto',`
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">${p.nombre||''}</div>
+    ${p.descripcion?`<div style="color:var(--muted);font-size:13px;margin-bottom:12px">${p.descripcion}</div>`:''}
+    <div class="row2">
+      <div class="field"><label>Precio</label><input value="${money(p.precio_venta)}" disabled></div>
+      <div class="field"><label>Stock</label><input value="${Number(p.stock)||0} ${p.unidad||''}" disabled></div>
+    </div>
+    <div class="field"><label>Ubicación</label><input value="${p.ubicacion||'— sin asignar —'}" disabled></div>
+    ${eq&&eq.length?`<div class="field"><label>Equivalencias</label>
+      <div style="font-size:12px;color:var(--muted);line-height:1.7">${eq.map(e=>e.codigo).join(' · ')}</div></div>`:''}
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>
+     <button class="btn" onclick='cartAdd(${JSON.stringify({producto_id:p.id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio_venta,stock:p.stock}).replace(/'/g,"&#39;")});closeModal()'>Agregar a la venta</button>`);
+}
+async function verProductoPorCodigo(cod){
+  const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
+  if(data&&data[0]) verProducto(data[0].id);
+}
+
+// ============ CARRITO ============
+function cartAdd(r){
+  const id=r.producto_id;
+  const ya=CART.find(x=>x.producto_id===id);
+  if(ya){ ya.cantidad++; } else {
+    CART.push({producto_id:id,codigo:r.codigo,descripcion:r.descripcion,
+               precio:Number(r.precio)||0,stock:Number(r.stock)||0,cantidad:1});
+  }
+  renderCart();
+}
+function cartAddTodos(){ BUS_FILTROS.forEach(r=>cartAdd(r)); }
+function cartDel(id){ CART=CART.filter(x=>x.producto_id!==id); renderCart(); }
+function cartQty(id,v){ const l=CART.find(x=>x.producto_id===id); if(l) l.cantidad=Math.max(1,Number(v)||1); renderCart(); }
+function cartTotal(){ return CART.reduce((s,l)=>s+l.precio*l.cantidad,0); }
+function renderCart(){
+  const bar=$('cart-bar'); if(!bar) return;
+  if(!CART.length){ bar.innerHTML=''; return; }
+  bar.innerHTML=`<div class="cart-bar">
+      <div><b>${CART.length}</b> producto(s) · <b style="color:var(--amber)">${money(cartTotal())}</b></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="cartVer()">Ver selección</button>
+        <button class="btn btn-sm" onclick="ventaRapida()">Crear venta</button>
+      </div>
+    </div>`;
+}
+function cartVer(){
+  openModal('Selección',`
+    <table class="cmp-lines"><thead><tr><th>Producto</th><th>Cant.</th><th class="cmp-num">Subtotal</th><th></th></tr></thead>
+    <tbody>${CART.map(l=>`<tr>
+      <td><b>${l.codigo||''}</b><div style="font-size:11px;color:var(--muted)">${l.descripcion||''}</div></td>
+      <td style="width:80px"><input type="number" min="1" value="${l.cantidad}" onchange="cartQty(${l.producto_id},this.value)"></td>
+      <td class="cmp-num">${money(l.precio*l.cantidad)}</td>
+      <td><button class="cmp-delrow" onclick="cartDel(${l.producto_id});cartVer()">×</button></td>
+    </tr>`).join('')}</tbody></table>
+    <div style="text-align:right;margin-top:12px;font-size:18px">Total: <b style="color:var(--amber)">${money(cartTotal())}</b></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Seguir buscando</button>
+     <button class="btn" onclick="closeModal();ventaRapida()">Crear venta</button>`);
+}
+
+// ============ VENTA RÁPIDA ============
+let VR_CLI=null, VR_CAJ=null, VR_ALI=null, VR_CMP=null;
+async function ventaRapida(){
+  if(!CART.length){ alert('No hay productos seleccionados.'); return; }
+  if(!VR_CLI){
+    const [c,k,a,t]=await Promise.all([
+      sb.from('clientes').select('id,nombre').order('nombre'),
+      sb.from('cajas').select('id,nombre').eq('activo',true).order('id'),
+      sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id'),
+      sb.from('tipos_comprobante').select('id,nombre,letra,discrimina_iva').eq('activo',true).order('id')
+    ]);
+    VR_CLI=c.data||[]; VR_CAJ=k.data||[]; VR_ALI=a.data||[]; VR_CMP=t.data||[];
+  }
+  const a21=VR_ALI.find(x=>Number(x.porcentaje)===21)||VR_ALI[0];
+  openModal('Nueva venta',`
+    <div id="vr-msg"></div>
+    <div class="field"><label>Cliente</label>
+      <select id="vr-cli"><option value="">Consumidor final</option>
+        ${VR_CLI.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    <div class="row2">
+      <div class="field"><label>Condición</label>
+        <select id="vr-cond" onchange="vrToggle()">
+          <option value="contado">Contado</option><option value="cta_cte">Cuenta corriente</option></select></div>
+      <div class="field" id="vr-caja-w"><label>Caja</label>
+        <select id="vr-caja">${VR_CAJ.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Facturación</label>
+        <select id="vr-fact" onchange="vrToggle()"><option value="si">Facturada</option><option value="no">Sin facturar</option></select></div>
+      <div class="field" id="vr-comp-w"><label>Comprobante</label>
+        <select id="vr-comp">${VR_CMP.filter(c=>c.nombre!=='Sin comprobante').map(c=>`<option value="${c.id}" data-d="${c.discrimina_iva}">${c.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Alícuota IVA</label>
+      <select id="vr-alic">${VR_ALI.map(x=>`<option value="${x.id}" ${a21&&x.id===a21.id?'selected':''}>${x.nombre}</option>`).join('')}</select></div>
+    <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px">
+      ${CART.length} producto(s) — Total estimado <b style="color:var(--amber)">${money(cartTotal())}</b>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
+    </div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" id="vr-ok" onclick="vrGuardar()">Registrar venta</button>`);
+  vrToggle();
+}
+function vrToggle(){
+  const cond=$('vr-cond'), cw=$('vr-caja-w'), f=$('vr-fact'), pw=$('vr-comp-w');
+  if(cond&&cw) cw.style.display = cond.value==='contado'?'':'none';
+  if(f&&pw)    pw.style.display = f.value==='si'?'':'none';
+}
+async function vrGuardar(){
+  const m=$('vr-msg');
+  const set=(t,tp)=>{ if(m) m.innerHTML=`<div class="msg ${tp}">${t}</div>`; };
+  const cliente_id=Number($('vr-cli').value)||null;
+  const forma_pago=$('vr-cond').value;
+  const facturada=$('vr-fact').value==='si';
+  const caja_id=forma_pago==='contado'?(Number($('vr-caja').value)||null):null;
+  const comp_id=facturada?(Number($('vr-comp').value)||null):null;
+  const alic_id=Number($('vr-alic').value)||null;
+  if(forma_pago==='contado'&&!caja_id){ set('Elegí la caja.','error'); return; }
+  if(forma_pago==='cta_cte'&&!cliente_id){ set('Para cuenta corriente elegí un cliente.','error'); return; }
+  if(facturada&&!comp_id){ set('Elegí el comprobante.','error'); return; }
+
+  const btn=$('vr-ok'); if(btn) btn.disabled=true;
+  set('Registrando…','ok');
+
+  const cab={cliente_id, fecha:new Date().toISOString().slice(0,10),
+    facturada, naturaleza:facturada?'fiscal':'interna', tipo_comprobante_id:comp_id,
+    forma_pago, estado_pago: forma_pago==='cta_cte'?'pendiente':'pagado',
+    notas:'Venta rápida desde Buscador', creado_por:currentUser.id};
+  const {data:v,error:e1}=await sb.from('ventas').insert(cab).select('id').single();
+  if(e1){ if(btn) btn.disabled=false; set('No se pudo crear la venta: '+e1.message,'error'); return; }
+
+  const comp=VR_CMP.find(c=>c.id===comp_id);
+  const discrimina = facturada ? (comp?comp.discrimina_iva:true) : false;
+  const items=CART.map(l=>{
+    const base=l.precio*l.cantidad;
+    const row={venta_id:v.id, producto_id:l.producto_id, descripcion:l.codigo||l.descripcion||null,
+      cantidad:l.cantidad, precio_unitario:l.precio,
+      alicuota_iva_id: facturada?alic_id:null, subtotal:base};
+    row.neto_unitario = (facturada && !discrimina) ? 0 : l.precio;
+    return row;
+  });
+  const {error:e2}=await sb.from('venta_items').insert(items);
+  if(e2){ if(btn) btn.disabled=false; set('La venta se creó pero fallaron los ítems: '+e2.message,'error'); return; }
+
+  const {error:e3}=await sb.rpc('registrar_venta',{p_venta_id:v.id,p_caja_id:caja_id});
+  if(e3){ if(btn) btn.disabled=false;
+    set('No se pudo registrar: '+(/caja/i.test(e3.message)?'falta elegir la caja.':e3.message),'error'); return; }
+
+  CART=[]; renderCart();
+  set('✓ Venta #'+v.id+' registrada. Stock y '+(forma_pago==='cta_cte'?'cuenta corriente':'caja')+' actualizados.','ok');
+  setTimeout(()=>{ closeModal(); },1400);
 }
 
 // ============ MODO CÓDIGO ============
@@ -1273,17 +1594,17 @@ async function buscarCodigo(q){
   if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No se encontró ningún filtro con el código "'+q+'".</div></div>'; return; }
   box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">${data.length} resultado(s)</div>
     <div class="panel"><table>
-      <thead><tr><th>Código Wega</th><th>Tipo</th><th>Aplicación</th><th>Equivalencias</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th></tr></thead>
+      <thead><tr><th>Código Wega</th><th>Tipo</th><th>Aplicación</th><th>Equivalencias</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th><th></th></tr></thead>
       <tbody>${data.map(r=>`<tr>
-        <td style="font-weight:600;white-space:nowrap">${r.codigo_wega}</td>
+        <td style="font-weight:600;white-space:nowrap"><a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo_wega}</a></td>
         <td><span class="tag ok">${r.tipo}</span></td>
         <td style="font-size:12px">${r.aplicacion||''}</td>
         <td style="color:var(--muted);font-size:12px">${r.equivalencias||'—'}</td>
-        <td style="text-align:right">${Number(r.stock)||0}</td>
+        <td style="text-align:right">${Number(r.stock)>0?Number(r.stock):'<span class="tag pend">Sin stock</span>'}</td>
         <td style="text-align:right;color:var(--amber);font-weight:600;white-space:nowrap">${money(r.precio)}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="verProducto(${r.producto_id})">Ver</button></td>
       </tr>`).join('')}</tbody></table></div>`;
 }
-
 
 // ----- CONFIGURACIÓN -----
 PAGES.config=async ()=>{
