@@ -68,7 +68,11 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .brand{padding:20px 22px;font-size:24px;font-weight:700;border-bottom:1px solid var(--line)}
 .brand span{color:var(--amber)}
 .brand small{display:block;font-family:'Inter';font-size:11px;font-weight:400;color:var(--muted);letter-spacing:.5px}
-.nav{flex:1;overflow-y:auto;padding:10px 0}
+.nav{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:10px 0}
+.nav::-webkit-scrollbar{width:8px}
+.nav::-webkit-scrollbar-track{background:transparent}
+.nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.nav::-webkit-scrollbar-thumb:hover{background:var(--muted)}
 .navlink{
   display:flex;align-items:center;gap:11px;padding:10px 22px;
   color:var(--muted);font-size:16px;font-weight:500;cursor:pointer;
@@ -150,6 +154,44 @@ select{
   border:1px solid var(--line);border-radius:var(--radius);color:var(--text);
 }
 select:disabled{opacity:.5}
+
+/* ---- Buscador: listados navegables ---- */
+.picker-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.picker-head{
+  display:flex;align-items:center;gap:10px;margin-bottom:6px;
+}
+.picker-head span{
+  font-family:'Barlow Condensed';font-size:16px;font-weight:600;color:var(--text);white-space:nowrap;
+}
+.picker-filter{
+  flex:1;padding:6px 10px;background:var(--graphite);border:1px solid var(--line);
+  border-radius:var(--radius);color:var(--text);font-size:12px;
+}
+.picker-filter:focus{outline:none;border-color:var(--amber)}
+.picker-filter:disabled{opacity:.4}
+.picker-list{
+  height:280px;overflow-y:auto;overflow-x:hidden;
+  background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);
+  overscroll-behavior:contain;
+}
+.picker-list::-webkit-scrollbar{width:10px}
+.picker-list::-webkit-scrollbar-track{background:var(--graphite)}
+.picker-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+.picker-list::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+.picker-item{
+  padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);
+}
+.picker-item:hover{background:var(--panel-2)}
+.picker-item.on{background:rgba(245,165,36,.14);color:var(--amber);font-weight:600}
+.picker-empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:13px}
+.sug-box{
+  margin-top:6px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:var(--radius);max-height:260px;overflow-y:auto;overscroll-behavior:contain;
+}
+.sug{padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);display:flex;align-items:center;gap:9px}
+.sug:last-child{border-bottom:none}
+.sug:hover{background:var(--panel)}
+@media(max-width:760px){ .picker-grid{grid-template-columns:1fr} .picker-list{height:200px} }
 @media(max-width:720px){
   .sidebar{width:64px}.brand,.navlink span.lbl,.userbox .u-name,.userbox .u-rol,.logout{display:none}
   .navlink{justify-content:center;padding:12px 0}
@@ -502,6 +544,8 @@ PAGES.usuarios=async ()=>{
 
 // ----- BUSCADOR (por vehículo o por código) -----
 let BUSCADOR_MODO='vehiculo';
+let CACHE_MARCAS=null, MARCA_SEL=null, MODELO_SEL=null, CACHE_MODELOS=[];
+
 PAGES.buscador=async ()=>{
   content.innerHTML=`
     <div class="panel" style="margin-bottom:18px">
@@ -522,41 +566,134 @@ function setModo(m){
   if(m==='vehiculo') formVehiculo(); else formCodigo();
 }
 
-// --- Modo vehículo: desplegables encadenados ---
+// ============ MODO VEHÍCULO ============
 async function formVehiculo(){
   $('bform').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end">
-      <div class="field" style="margin:0"><label>Marca</label>
-        <select id="sel-marca"><option value="">Cargando…</option></select></div>
-      <div class="field" style="margin:0"><label>Modelo</label>
-        <select id="sel-modelo" disabled><option value="">Elegí una marca</option></select></div>
-      <button class="btn" onclick="buscarVehiculo()" style="height:40px">Buscar filtros</button>
+    <div class="field" style="margin-bottom:16px">
+      <label>Buscar marca o modelo</label>
+      <input id="vq" type="text" placeholder="Escribí: Toyota, Hilux, Gol, Focus…" autocomplete="off" style="font-size:15px;padding:12px 14px">
+      <div id="vq-hits"></div>
+    </div>
+    <div class="picker-grid">
+      <div>
+        <div class="picker-head">
+          <span>Marca</span>
+          <input id="fm" class="picker-filter" placeholder="Filtrar marcas…" autocomplete="off">
+        </div>
+        <div id="lista-marcas" class="picker-list"><div class="loading" style="padding:20px">Cargando…</div></div>
+      </div>
+      <div>
+        <div class="picker-head">
+          <span>Modelo</span>
+          <input id="fmo" class="picker-filter" placeholder="Filtrar modelos…" autocomplete="off" disabled>
+        </div>
+        <div id="lista-modelos" class="picker-list"><div class="picker-empty">Elegí una marca</div></div>
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn" onclick="buscarVehiculo()">Buscar filtros</button>
+      <button class="btn btn-ghost" onclick="limpiarSeleccion()">Limpiar</button>
+      <span id="sel-info" style="color:var(--muted);font-size:13px"></span>
     </div>`;
-  const {data}=await sb.from('vehiculos_catalogo').select('marca').order('marca');
-  const marcas=[...new Set((data||[]).map(x=>x.marca))];
-  $('sel-marca').innerHTML='<option value="">Elegí una marca…</option>'+marcas.map(m=>`<option>${m}</option>`).join('');
-  $('sel-marca').onchange=async e=>{
-    const m=e.target.value, sm=$('sel-modelo');
-    if(!m){ sm.disabled=true; sm.innerHTML='<option value="">Elegí una marca</option>'; return; }
-    sm.disabled=false; sm.innerHTML='<option value="">Cargando…</option>';
-    const {data}=await sb.from('vehiculos_catalogo').select('modelo').eq('marca',m).order('modelo');
-    const mods=[...new Set((data||[]).map(x=>x.modelo))];
-    sm.innerHTML='<option value="">Todos los modelos</option>'+mods.map(x=>`<option>${x}</option>`).join('');
-  };
+
+  // cargar marcas (una sola vez)
+  if(!CACHE_MARCAS){
+    const {data}=await sb.from('vehiculos_catalogo').select('marca').order('marca');
+    CACHE_MARCAS=[...new Set((data||[]).map(x=>x.marca))];
+  }
+  pintarMarcas(CACHE_MARCAS);
+  $('fm').addEventListener('input',e=>{
+    const q=e.target.value.toLowerCase();
+    pintarMarcas(CACHE_MARCAS.filter(m=>m.toLowerCase().includes(q)));
+  });
+  $('fmo').addEventListener('input',e=>{
+    const q=e.target.value.toLowerCase();
+    pintarModelos(CACHE_MODELOS.filter(m=>m.toLowerCase().includes(q)));
+  });
+  // autocompletado global (marca o modelo)
+  const vq=$('vq'); let t=null;
+  vq.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(()=>sugerir(vq.value.trim()),250); });
+  vq.focus();
+  actualizarInfo();
 }
+
+function pintarMarcas(arr){
+  const box=$('lista-marcas'); if(!box) return;
+  if(!arr.length){ box.innerHTML='<div class="picker-empty">Sin coincidencias</div>'; return; }
+  box.innerHTML=arr.map(m=>`<div class="picker-item${m===MARCA_SEL?' on':''}" onclick="elegirMarca('${m.replace(/'/g,"\\'")}')">${m}</div>`).join('');
+}
+function pintarModelos(arr){
+  const box=$('lista-modelos'); if(!box) return;
+  if(!arr.length){ box.innerHTML='<div class="picker-empty">Sin coincidencias</div>'; return; }
+  box.innerHTML='<div class="picker-item'+(MODELO_SEL===null?' on':'')+'" onclick="elegirModelo(null)"><i>Todos los modelos</i></div>'+
+    arr.map(m=>`<div class="picker-item${m===MODELO_SEL?' on':''}" onclick="elegirModelo('${m.replace(/'/g,"\\'")}')">${m}</div>`).join('');
+}
+
+async function elegirMarca(m, buscar){
+  MARCA_SEL=m; MODELO_SEL=null; CACHE_MODELOS=[];
+  pintarMarcas(CACHE_MARCAS.filter(x=>x.toLowerCase().includes(($('fm')?.value||'').toLowerCase())));
+  const lm=$('lista-modelos'); lm.innerHTML='<div class="loading" style="padding:20px">Cargando…</div>';
+  const fmo=$('fmo'); if(fmo){ fmo.disabled=false; fmo.value=''; }
+  const {data}=await sb.from('vehiculos_catalogo').select('modelo').eq('marca',m).order('modelo');
+  CACHE_MODELOS=[...new Set((data||[]).map(x=>x.modelo))];
+  pintarModelos(CACHE_MODELOS);
+  actualizarInfo();
+  if(buscar) buscarVehiculo();
+}
+function elegirModelo(m){
+  MODELO_SEL=m;
+  pintarModelos(CACHE_MODELOS.filter(x=>x.toLowerCase().includes(($('fmo')?.value||'').toLowerCase())));
+  actualizarInfo();
+  buscarVehiculo();
+}
+function limpiarSeleccion(){
+  MARCA_SEL=null; MODELO_SEL=null; CACHE_MODELOS=[];
+  const fm=$('fm'), fmo=$('fmo'), vq=$('vq');
+  if(fm) fm.value=''; if(fmo){ fmo.value=''; fmo.disabled=true; } if(vq) vq.value='';
+  $('vq-hits').innerHTML='';
+  pintarMarcas(CACHE_MARCAS||[]);
+  $('lista-modelos').innerHTML='<div class="picker-empty">Elegí una marca</div>';
+  $('bres').innerHTML=''; actualizarInfo();
+}
+function actualizarInfo(){
+  const el=$('sel-info'); if(!el) return;
+  el.innerHTML = MARCA_SEL ? `Seleccionado: <b style="color:var(--text)">${MARCA_SEL}${MODELO_SEL?' · '+MODELO_SEL:' · todos los modelos'}</b>` : 'Ninguna marca seleccionada';
+}
+
+// autocompletado: sugiere marcas y modelos que coincidan
+async function sugerir(q){
+  const box=$('vq-hits'); if(!box) return;
+  if(!q||q.length<2){ box.innerHTML=''; return; }
+  const ql=q.toLowerCase();
+  const marcas=(CACHE_MARCAS||[]).filter(m=>m.toLowerCase().includes(ql)).slice(0,6);
+  const {data}=await sb.from('vehiculos_catalogo').select('marca,modelo').ilike('modelo','%'+q+'%').limit(200);
+  const vistos=new Set(); const modelos=[];
+  (data||[]).forEach(r=>{ const k=r.marca+'|'+r.modelo; if(!vistos.has(k)){ vistos.add(k); modelos.push(r); } });
+  const items=[
+    ...marcas.map(m=>`<div class="sug" onclick="desdeSugerencia('${m.replace(/'/g,"\\'")}',null)"><span class="tag warn">Marca</span> ${m}</div>`),
+    ...modelos.slice(0,8).map(r=>`<div class="sug" onclick="desdeSugerencia('${r.marca.replace(/'/g,"\\'")}','${r.modelo.replace(/'/g,"\\'")}')"><span class="tag ok">Modelo</span> ${r.marca} · <b>${r.modelo}</b></div>`)
+  ];
+  box.innerHTML = items.length ? '<div class="sug-box">'+items.join('')+'</div>'
+    : '<div class="sug-box"><div class="picker-empty">Sin coincidencias para "'+q+'"</div></div>';
+}
+async function desdeSugerencia(marca, modelo){
+  $('vq-hits').innerHTML=''; $('vq').value = modelo? (marca+' '+modelo) : marca;
+  await elegirMarca(marca, !modelo);
+  if(modelo){ MODELO_SEL=modelo; pintarModelos(CACHE_MODELOS); actualizarInfo(); buscarVehiculo(); }
+}
+
 async function buscarVehiculo(){
-  const marca=$('sel-marca').value, modelo=$('sel-modelo').value||null;
   const box=$('bres');
-  if(!marca){ box.innerHTML='<div class="msg error">Elegí una marca para buscar.</div>'; return; }
+  if(!MARCA_SEL){ box.innerHTML='<div class="msg error">Elegí una marca de la lista o buscala arriba.</div>'; return; }
   box.innerHTML='<div class="loading">Buscando filtros…</div>';
-  const {data,error}=await sb.rpc('buscar_por_vehiculo',{p_marca:marca,p_modelo:modelo});
+  const {data,error}=await sb.rpc('buscar_por_vehiculo',{p_marca:MARCA_SEL,p_modelo:MODELO_SEL});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
   if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para ese vehículo.</div></div>'; return; }
   const grupos={};
   data.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
   const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
   box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">
-      ${data.length} filtro(s) para <b style="color:var(--text)">${marca}${modelo?' '+modelo:''}</b></div>`+
+      ${data.length} filtro(s) para <b style="color:var(--text)">${MARCA_SEL}${MODELO_SEL?' '+MODELO_SEL:''}</b></div>`+
     ord.map(([tipo,g])=>`
       <div class="panel" style="margin-bottom:16px">
         <div class="panel-head"><h3>${tipo} <span style="color:var(--muted);font-weight:400;font-size:13px">(${g.items.length})</span></h3></div>
@@ -571,7 +708,7 @@ async function buscarVehiculo(){
       </div>`).join('');
 }
 
-// --- Modo código / equivalencia ---
+// ============ MODO CÓDIGO ============
 function formCodigo(){
   $('bform').innerHTML=`
     <div class="field" style="margin:0">
