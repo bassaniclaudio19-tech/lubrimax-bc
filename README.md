@@ -1,2 +1,1653 @@
-# lubrimax-bc
-Sistema de gestión integral para Lubrimax BC, lubricentro y centro de servicios automotrices de Trenque Lauquen, Buenos Aires.
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lubrimax BC — Gestión</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --graphite:#1A1D23; --panel:#242830; --panel-2:#2C313B;
+  --amber:#F5A524; --amber-dim:#c9861a;
+  --text:#E8EAED; --muted:#8B92A0; --line:#363C47;
+  --ok:#3FB950; --danger:#F85149; --danger-dim:#b3392f;
+  --radius:6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--graphite); color:var(--text);
+  font-size:14px; line-height:1.5;
+}
+h1,h2,h3,.brand,.navlink,th{font-family:'Barlow Condensed',sans-serif;letter-spacing:.3px}
+button{font-family:inherit;cursor:pointer;border:none}
+input,select,textarea{font-family:inherit;font-size:14px}
+
+/* ---------- LOGIN ---------- */
+#login{
+  position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(circle at 30% 20%,#22262e,#14161b);
+  z-index:100;
+}
+.login-card{
+  width:340px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);padding:32px 28px;
+}
+.login-logo{font-family:'Barlow Condensed';font-weight:700;font-size:30px;letter-spacing:1px}
+.login-logo span{color:var(--amber)}
+.login-sub{color:var(--muted);font-size:13px;margin:2px 0 24px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px}
+.field input, .field select{
+  width:100%;padding:10px 12px;background:var(--graphite);
+  border:1px solid var(--line);border-radius:var(--radius);color:var(--text);
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--amber)}
+.btn-primary{
+  width:100%;padding:11px;background:var(--amber);color:#1a1205;
+  font-weight:600;border-radius:var(--radius);font-size:14px;
+}
+.btn-primary:hover{background:var(--amber-dim)}
+.login-switch{text-align:center;margin-top:16px;font-size:13px;color:var(--muted)}
+.login-switch a{color:var(--amber);cursor:pointer;text-decoration:none}
+.msg{font-size:13px;padding:8px 10px;border-radius:var(--radius);margin-bottom:14px}
+.msg.error{background:rgba(248,81,73,.12);color:#ff8b84;border:1px solid var(--danger-dim)}
+.msg.ok{background:rgba(63,185,80,.12);color:#6fd47f;border:1px solid #2a6b33}
+
+/* ---------- LAYOUT ---------- */
+#app{display:none;height:100vh}
+.shell{display:flex;height:100vh}
+.sidebar{
+  width:230px;background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;flex-shrink:0;
+}
+.brand{padding:20px 22px;font-size:24px;font-weight:700;border-bottom:1px solid var(--line)}
+.brand span{color:var(--amber)}
+.brand small{display:block;font-family:'Inter';font-size:11px;font-weight:400;color:var(--muted);letter-spacing:.5px}
+.nav{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:10px 0}
+.nav::-webkit-scrollbar{width:8px}
+.nav::-webkit-scrollbar-track{background:transparent}
+.nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+.nav::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+.navlink{
+  display:flex;align-items:center;gap:11px;padding:10px 22px;
+  color:var(--muted);font-size:16px;font-weight:500;cursor:pointer;
+  border-left:3px solid transparent;
+}
+.navlink:hover{color:var(--text);background:var(--panel-2)}
+.navlink.active{color:var(--amber);border-left-color:var(--amber);background:var(--panel-2)}
+.navlink .ic{width:18px;text-align:center;font-size:15px}
+.userbox{padding:14px 22px;border-top:1px solid var(--line);font-size:13px}
+.userbox .u-name{font-weight:600}
+.userbox .u-rol{color:var(--muted);font-size:12px;text-transform:capitalize}
+.logout{margin-top:8px;color:var(--muted);font-size:12px;background:none;padding:0}
+.logout:hover{color:var(--danger)}
+
+.main{flex:1;overflow-y:auto}
+.topbar{
+  height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;
+  justify-content:space-between;padding:0 26px;position:sticky;top:0;background:var(--graphite);z-index:10;
+}
+.topbar h2{font-size:22px;font-weight:600}
+.content{padding:26px}
+
+.btn{
+  padding:9px 16px;background:var(--amber);color:#1a1205;font-weight:600;
+  border-radius:var(--radius);font-size:13px;
+}
+.btn:hover{background:var(--amber-dim)}
+.btn-ghost{background:var(--panel-2);color:var(--text);border:1px solid var(--line)}
+.btn-ghost:hover{background:var(--panel)}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+/* ---------- CARDS / STATS ---------- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:18px 20px}
+.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+.stat .v{font-family:'Barlow Condensed';font-size:32px;font-weight:700;margin-top:4px}
+.stat .v.amber{color:var(--amber)}
+.stat .v.ok{color:var(--ok)}
+.stat .v.danger{color:var(--danger)}
+
+/* ---------- TABLES ---------- */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.panel-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--line)}
+.panel-head h3{font-size:18px;font-weight:600}
+table{width:100%;border-collapse:collapse}
+th{
+  text-align:left;padding:11px 18px;font-size:13px;font-weight:600;
+  color:var(--muted);border-bottom:1px solid var(--line);text-transform:uppercase;letter-spacing:.4px;
+}
+td{padding:11px 18px;border-bottom:1px solid var(--line);font-size:13px}
+tr:last-child td{border-bottom:none}
+tbody tr:hover{background:var(--panel-2)}
+.empty{padding:40px;text-align:center;color:var(--muted)}
+.tag{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:600}
+.tag.ok{background:rgba(63,185,80,.15);color:var(--ok)}
+.tag.warn{background:rgba(245,165,36,.15);color:var(--amber)}
+.tag.pend{background:rgba(248,81,73,.15);color:var(--danger)}
+
+/* ---------- MODAL ---------- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;padding:20px}
+.overlay.show{display:flex}
+.modal{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);width:460px;max-width:100%;max-height:90vh;overflow-y:auto}
+.modal-head{padding:18px 22px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.modal-head h3{font-size:20px;font-weight:600}
+.modal-head .x{background:none;color:var(--muted);font-size:22px;line-height:1}
+.modal-body{padding:22px}
+.modal-foot{padding:16px 22px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+.loading{padding:40px;text-align:center;color:var(--muted)}
+.btab{
+  background:none;color:var(--muted);padding:14px 18px;font-size:14px;font-weight:600;
+  border-bottom:2px solid transparent;font-family:'Barlow Condensed';font-size:17px;letter-spacing:.3px;
+}
+.btab:hover{color:var(--text)}
+.btab.on{color:var(--amber);border-bottom-color:var(--amber)}
+select{
+  width:100%;padding:10px 12px;background:var(--graphite);
+  border:1px solid var(--line);border-radius:var(--radius);color:var(--text);
+}
+select:disabled{opacity:.5}
+
+/* ---- Buscador: listados navegables ---- */
+.picker-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.picker-head{
+  display:flex;align-items:center;gap:10px;margin-bottom:6px;
+}
+.picker-head span{
+  font-family:'Barlow Condensed';font-size:16px;font-weight:600;color:var(--text);white-space:nowrap;
+}
+.picker-filter{
+  flex:1;padding:6px 10px;background:var(--graphite);border:1px solid var(--line);
+  border-radius:var(--radius);color:var(--text);font-size:12px;
+}
+.picker-filter:focus{outline:none;border-color:var(--amber)}
+.picker-filter:disabled{opacity:.4}
+.picker-list{
+  height:280px;overflow-y:auto;overflow-x:hidden;
+  background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);
+  overscroll-behavior:contain;
+}
+.picker-list::-webkit-scrollbar{width:10px}
+.picker-list::-webkit-scrollbar-track{background:var(--graphite)}
+.picker-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:5px}
+.picker-list::-webkit-scrollbar-thumb:hover{background:var(--muted)}
+.picker-item{
+  padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);
+  display:flex;justify-content:space-between;align-items:center;gap:10px;
+}
+.picker-count{
+  font-size:11px;color:var(--muted);background:var(--panel);padding:1px 7px;border-radius:10px;flex-shrink:0;
+}
+.picker-item.on .picker-count{background:rgba(245,165,36,.2);color:var(--amber)}
+.picker-item:hover{background:var(--panel-2)}
+.picker-item.on{background:rgba(245,165,36,.14);color:var(--amber);font-weight:600}
+.picker-empty{padding:22px 14px;text-align:center;color:var(--muted);font-size:13px}
+.sug-box{
+  margin-top:6px;background:var(--panel-2);border:1px solid var(--line);
+  border-radius:var(--radius);max-height:260px;overflow-y:auto;overscroll-behavior:contain;
+}
+.sug{padding:9px 14px;font-size:13px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5);display:flex;align-items:center;gap:9px}
+.sug:last-child{border-bottom:none}
+.sug:hover{background:var(--panel)}
+/* ---- COMPRAS ---- */
+.cmp-head{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+.cmp-head .field{margin:0}
+.cmp-toggle{display:flex;gap:0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.cmp-toggle button{flex:1;padding:9px;background:var(--graphite);color:var(--muted);font-weight:600;font-size:13px}
+.cmp-toggle button.on{background:var(--amber);color:#1a1205}
+.cmp-banner{padding:10px 14px;border-radius:var(--radius);font-size:13px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.cmp-banner.nofact{background:rgba(245,165,36,.12);color:var(--amber);border:1px solid var(--amber-dim)}
+.cmp-lines{width:100%;border-collapse:collapse;margin-top:4px}
+.cmp-lines th{padding:8px 10px;font-size:11px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line);text-align:left}
+.cmp-lines td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.cmp-lines input,.cmp-lines select{width:100%;padding:7px 9px;background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-size:13px}
+.cmp-lines input:focus,.cmp-lines select:focus{outline:none;border-color:var(--amber)}
+.cmp-lines input[readonly]{background:var(--panel);color:var(--muted);border-color:transparent}
+.cmp-num{text-align:right;font-variant-numeric:tabular-nums}
+.cmp-prodwrap{position:relative}
+.cmp-prodhits{position:absolute;top:100%;left:0;right:0;z-index:20;background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);max-height:240px;overflow-y:auto;margin-top:2px;display:none}
+.cmp-prodhits.show{display:block}
+.cmp-prodhit{padding:8px 11px;font-size:12px;cursor:pointer;border-bottom:1px solid rgba(54,60,71,.5)}
+.cmp-prodhit:hover{background:var(--panel)}
+.cmp-prodhit b{color:var(--amber)}
+.cmp-prodinfo{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4}
+.cmp-delrow{background:none;color:var(--muted);font-size:18px;line-height:1;padding:4px 8px}
+.cmp-delrow:hover{color:var(--danger)}
+.cmp-totals{display:flex;justify-content:flex-end;gap:26px;padding:16px 20px;border-top:1px solid var(--line);margin-top:4px}
+.cmp-totals .tt{text-align:right}
+.cmp-totals .tt .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+.cmp-totals .tt .v{font-family:'Barlow Condensed';font-size:24px;font-weight:700}
+.cmp-totals .tt.total .v{color:var(--amber)}
+.cmp-filters{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end}
+.cmp-filters .field{margin:0;min-width:130px}
+.cmp-filters .field.sm{min-width:110px}
+.cmp-filters label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+.cmp-filters input,.cmp-filters select{padding:8px 10px;background:var(--graphite);border:1px solid var(--line);border-radius:var(--radius);color:var(--text);font-size:13px;width:100%}
+@media(max-width:760px){ .picker-grid{grid-template-columns:1fr} .picker-list{height:200px} .cmp-head{grid-template-columns:1fr} }
+@media(max-width:720px){
+  .sidebar{width:64px}.brand,.navlink span.lbl,.userbox .u-name,.userbox .u-rol,.logout{display:none}
+  .navlink{justify-content:center;padding:12px 0}
+}
+
+/* ---- BUSCADOR v2: cascada, ficha, tabla, carrito ---- */
+.bus-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.bus-input{width:100%;padding:10px 12px;background:var(--graphite);border:1px solid var(--line);
+  border-radius:var(--radius);color:var(--text)}
+.bus-input:focus{outline:none;border-color:var(--amber)}
+.bus-drop{position:relative}
+.bus-drop.show::before{content:'';display:block}
+.bus-drop{display:none}
+.bus-drop.show{display:block;position:absolute;z-index:30;background:var(--panel-2);
+  border:1px solid var(--line);border-radius:var(--radius);margin-top:2px;
+  max-height:280px;overflow-y:auto;min-width:240px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.bus-opt{padding:9px 13px;font-size:13px;cursor:pointer;display:flex;justify-content:space-between;
+  gap:12px;border-bottom:1px solid rgba(54,60,71,.5);white-space:nowrap}
+.bus-opt:last-child{border-bottom:none}
+.bus-opt:hover{background:var(--panel)}
+.bus-badge{font-size:11px;color:var(--muted);background:var(--panel);padding:1px 7px;border-radius:10px}
+.bus-actions{display:flex;align-items:center;gap:10px;margin-top:14px;flex-wrap:wrap}
+.bus-sel{color:var(--muted);font-size:13px}
+
+.veh-card{background:linear-gradient(135deg,var(--panel-2),var(--panel));border:1px solid var(--line);
+  border-left:3px solid var(--amber);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.veh-card-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);width:100%}
+.veh-card-n{font-family:'Barlow Condensed';font-size:24px;font-weight:700}
+.veh-card-s{color:var(--muted);font-size:13px;flex:1}
+
+.filtro-list{display:flex;flex-direction:column}
+.filtro-row{display:flex;align-items:center;gap:14px;padding:12px 18px;
+  border-bottom:1px solid var(--line);flex-wrap:wrap}
+.filtro-row:last-child{border-bottom:none}
+.filtro-row:hover{background:var(--panel-2)}
+.filtro-main{flex:1;min-width:200px}
+.filtro-cod{font-weight:700;color:var(--amber);cursor:pointer;font-size:14px;text-decoration:none}
+.filtro-cod:hover{text-decoration:underline}
+.filtro-desc{font-size:12px;color:var(--text);margin-top:2px}
+.filtro-apl{font-size:11px;color:var(--muted);margin-top:3px}
+.filtro-meta{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.filtro-ubi{font-size:11px;color:var(--muted);border:1px dashed var(--line);padding:1px 7px;border-radius:4px}
+.filtro-precio{font-family:'Barlow Condensed';font-size:19px;font-weight:700;color:var(--amber);
+  min-width:90px;text-align:right}
+
+.tabla-wrap{overflow-x:auto}
+.cat-tabla{width:100%;border-collapse:collapse;font-size:12px}
+.cat-tabla th{padding:9px 12px;white-space:nowrap}
+.cat-tabla td{padding:9px 12px;vertical-align:top;border-bottom:1px solid var(--line)}
+
+.cart-bar{position:sticky;bottom:0;margin-top:18px;background:var(--panel-2);
+  border:1px solid var(--amber-dim);border-radius:var(--radius);padding:12px 18px;
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  box-shadow:0 -4px 18px rgba(0,0,0,.35);z-index:20}
+
+@media(max-width:860px){
+  .bus-grid{grid-template-columns:1fr}
+  .filtro-row{align-items:flex-start}
+  .filtro-meta{width:100%;justify-content:space-between}
+  .filtro-precio{text-align:left}
+  /* tabla -> tarjetas */
+  .cat-tabla thead{display:none}
+  .cat-tabla tr{display:block;border:1px solid var(--line);border-radius:var(--radius);
+    margin-bottom:10px;padding:6px 0;background:var(--graphite)}
+  .cat-tabla td{display:flex;justify-content:space-between;gap:14px;border:none;
+    padding:6px 14px;text-align:right}
+  .cat-tabla td::before{content:attr(data-l);color:var(--muted);font-size:11px;
+    text-transform:uppercase;letter-spacing:.4px;text-align:left;flex-shrink:0}
+}
+</style>
+</head>
+<body>
+
+<!-- ================= LOGIN ================= -->
+<div id="login">
+  <div class="login-card">
+    <div class="login-logo">LUBRI<span>MAX</span> BC</div>
+    <div class="login-sub">Sistema de gestión · Trenque Lauquen</div>
+    <div id="loginMsg"></div>
+
+    <div id="formLogin">
+      <div class="field"><label>Email</label><input id="li-email" type="email" placeholder="usuario@lubrimax.com"></div>
+      <div class="field"><label>Contraseña</label><input id="li-pass" type="password" placeholder="••••••••"></div>
+      <button class="btn-primary" onclick="doLogin()">Ingresar</button>
+      <div class="login-switch">¿No tenés cuenta? <a onclick="showRegister()">Registrate</a></div>
+    </div>
+
+    <div id="formRegister" style="display:none">
+      <div class="field"><label>Nombre</label><input id="rg-nombre" type="text" placeholder="Juan Pérez"></div>
+      <div class="field"><label>Email</label><input id="rg-email" type="email" placeholder="usuario@lubrimax.com"></div>
+      <div class="field"><label>Contraseña</label><input id="rg-pass" type="password" placeholder="mínimo 6 caracteres"></div>
+      <button class="btn-primary" onclick="doRegister()">Crear cuenta</button>
+      <div class="login-switch">¿Ya tenés cuenta? <a onclick="showLogin()">Ingresá</a></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= APP ================= -->
+<div id="app">
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">LUBRI<span>MAX</span><small>GESTIÓN INTEGRAL</small></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="userbox">
+      <div class="u-name" id="uName">—</div>
+      <div class="u-rol" id="uRol">—</div>
+      <button class="logout" onclick="doLogout()">Cerrar sesión</button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar"><h2 id="pageTitle">Panel</h2><div id="topActions"></div></div>
+    <div class="content" id="content"><div class="loading">Cargando…</div></div>
+  </div>
+</div>
+</div>
+
+<!-- ================= MODAL GENERICO ================= -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <div class="modal-head"><h3 id="mTitle">Nuevo</h3><button class="x" onclick="closeModal()">×</button></div>
+    <div class="modal-body" id="mBody"></div>
+    <div class="modal-foot" id="mFoot"></div>
+  </div>
+</div>
+
+<script>
+// ============ CONFIG SUPABASE ============
+const SUPABASE_URL = "https://fsgevsmotgrpbzpykkaq.supabase.co";
+const SUPABASE_KEY = "sb_publishable_I5ZGulR9JpDgQxqsTzcqnQ_P_sDbXaO";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+let currentUser = null, currentProfile = null;
+
+// ============ MENU ============
+const MENU = [
+  {id:'panel',      label:'Panel',        ic:'▚'},
+  {id:'buscador',   label:'Buscador',     ic:'⌕'},
+  {id:'productos',  label:'Productos y servicios', ic:'▤'},
+  {id:'stock',      label:'Stock',        ic:'▣'},
+  {id:'compras',    label:'Compras',      ic:'▼'},
+  {id:'presupuestos',label:'Presupuestos',ic:'◈'},
+  {id:'ventas',     label:'Ventas',       ic:'▲'},
+  {id:'trabajos',   label:'Trabajos',     ic:'✚'},
+  {id:'cobranzas',  label:'Cobranzas',    ic:'$'},
+  {id:'clientes',   label:'Clientes',     ic:'◍'},
+  {id:'proveedores',label:'Proveedores',  ic:'◐'},
+  {id:'usuarios',   label:'Usuarios',     ic:'◯'},
+  {id:'config',     label:'Configuración',ic:'⚙'},
+];
+
+// ============ AUTH ============
+const loginMsg = document.getElementById('loginMsg');
+function msg(el,text,type){el.innerHTML = text?`<div class="msg ${type}">${text}</div>`:''; }
+function showRegister(){document.getElementById('formLogin').style.display='none';document.getElementById('formRegister').style.display='block';msg(loginMsg,'');}
+function showLogin(){document.getElementById('formRegister').style.display='none';document.getElementById('formLogin').style.display='block';msg(loginMsg,'');}
+
+async function doRegister(){
+  const nombre=document.getElementById('rg-nombre').value.trim(),
+        email=document.getElementById('rg-email').value.trim(),
+        pass=document.getElementById('rg-pass').value;
+  if(!nombre||!email||pass.length<6){msg(loginMsg,'Completá los campos (contraseña mín. 6).','error');return;}
+  // El rol no se elige acá: el sistema asigna 'empleado'
+  // (o 'admin' automáticamente al primer usuario del sistema).
+  const {error}=await sb.auth.signUp({email,password:pass,options:{data:{nombre}}});
+  if(error){msg(loginMsg,error.message,'error');return;}
+  msg(loginMsg,'Cuenta creada. Ya podés ingresar. Un administrador te asignará permisos.','ok');
+  showLogin();
+}
+async function doLogin(){
+  const email=document.getElementById('li-email').value.trim(),
+        pass=document.getElementById('li-pass').value;
+  if(!email||!pass){msg(loginMsg,'Ingresá email y contraseña.','error');return;}
+  const {error}=await sb.auth.signInWithPassword({email,password:pass});
+  if(error){msg(loginMsg,'Email o contraseña incorrectos.','error');return;}
+}
+async function doLogout(){await sb.auth.signOut();}
+
+sb.auth.onAuthStateChange(async (_e,session)=>{
+  if(session?.user){currentUser=session.user; await loadProfile(); enterApp();}
+  else {currentUser=null;currentProfile=null;document.getElementById('login').style.display='flex';document.getElementById('app').style.display='none';}
+});
+async function loadProfile(){
+  const {data}=await sb.from('perfiles').select('*').eq('id',currentUser.id).single();
+  currentProfile=data||{nombre:currentUser.email,rol:'empleado'};
+}
+function enterApp(){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='block';
+  uName.textContent=currentProfile.nombre;
+  uRol.textContent=currentProfile.rol;
+  buildNav(); go('panel');
+}
+
+// ============ NAVEGACION ============
+function buildNav(){
+  nav.innerHTML = MENU.map(m=>`<div class="navlink" data-id="${m.id}" onclick="go('${m.id}')"><span class="ic">${m.ic}</span><span class="lbl">${m.label}</span></div>`).join('');
+}
+let currentPage='panel';
+function go(id){
+  currentPage=id;
+  document.querySelectorAll('.navlink').forEach(n=>n.classList.toggle('active',n.dataset.id===id));
+  const m=MENU.find(x=>x.id===id);
+  pageTitle.textContent=m.label;
+  topActions.innerHTML='';
+  PAGES[id]();
+}
+
+// ============ HELPERS ============
+const $=(id)=>document.getElementById(id);
+const money=(n)=>'$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const esAdmin=()=>!!(currentProfile && currentProfile.rol==='admin');
+function loading(){content.innerHTML='<div class="loading">Cargando…</div>';}
+function tableShell(title,cols,rowsHtml,addBtn){
+  return `<div class="panel"><div class="panel-head"><h3>${title}</h3>${addBtn||''}</div>
+    <table><thead><tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr></thead>
+    <tbody>${rowsHtml||`<tr><td colspan="${cols.length}"><div class="empty">Sin registros todavía.</div></td></tr>`}</tbody></table></div>`;
+}
+// Modal
+function openModal(title,bodyHtml,footHtml){mTitle.textContent=title;mBody.innerHTML=bodyHtml;mFoot.innerHTML=footHtml;overlay.classList.add('show');}
+function closeModal(){overlay.classList.remove('show');}
+
+// ============ PAGINAS ============
+const PAGES={};
+
+// ----- PANEL -----
+PAGES.panel=async ()=>{
+  loading();
+  const [{count:prod},{count:cli},{count:vts},prodLow] = await Promise.all([
+    sb.from('productos').select('*',{count:'exact',head:true}),
+    sb.from('clientes').select('*',{count:'exact',head:true}),
+    sb.from('ventas').select('*',{count:'exact',head:true}),
+    sb.from('productos').select('nombre,stock,stock_minimo').eq('tipo','producto'),
+  ]);
+  const bajos=(prodLow.data||[]).filter(p=>Number(p.stock)<=Number(p.stock_minimo));
+  content.innerHTML=`
+    <div class="stats">
+      <div class="stat"><div class="k">Productos y servicios</div><div class="v amber">${prod||0}</div></div>
+      <div class="stat"><div class="k">Clientes</div><div class="v">${cli||0}</div></div>
+      <div class="stat"><div class="k">Ventas registradas</div><div class="v ok">${vts||0}</div></div>
+      <div class="stat"><div class="k">Stock bajo</div><div class="v ${bajos.length?'danger':'ok'}">${bajos.length}</div></div>
+    </div>
+    ${tableShell('Alertas de stock',['Producto','Stock actual','Mínimo','Estado'],
+      bajos.length? bajos.map(p=>`<tr><td>${p.nombre}</td><td>${p.stock}</td><td>${p.stock_minimo}</td><td><span class="tag pend">Reponer</span></td></tr>`).join('') : '')}
+  `;
+};
+
+// ----- PRODUCTOS Y SERVICIOS -----
+PAGES.productos=async ()=>{
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="formProducto()">+ Nuevo</button>`;
+  const {data}=await sb.from('productos').select('*').order('nombre');
+  const rows=(data||[]).map(p=>`<tr>
+    <td>${p.codigo||'—'}</td><td>${p.nombre}</td>
+    <td><span class="tag ${p.tipo==='servicio'?'warn':'ok'}">${p.tipo}</span></td>
+    <td>${money(p.precio_venta)}</td>
+    <td>${p.tipo==='producto'?p.stock:'—'}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p)})'>Editar</button></td>
+  </tr>`).join('');
+  content.innerHTML=tableShell('Catálogo',['Código','Nombre','Tipo','Precio','Stock','']  ,rows);
+};
+function formProducto(p){
+  p=p||{};
+  openModal(p.id?'Editar producto':'Nuevo producto',`
+    <div class="field"><label>Tipo</label><select id="f-tipo"><option value="producto"${p.tipo==='producto'?' selected':''}>Producto</option><option value="servicio"${p.tipo==='servicio'?' selected':''}>Servicio</option></select></div>
+    <div class="row2">
+      <div class="field"><label>Código</label><input id="f-codigo" value="${p.codigo||''}"></div>
+      <div class="field"><label>Unidad</label><input id="f-unidad" value="${p.unidad||'unidad'}"></div>
+    </div>
+    <div class="field"><label>Nombre</label><input id="f-nombre" value="${p.nombre||''}"></div>
+    <div class="row2">
+      <div class="field"><label>Precio venta</label><input id="f-precio" type="number" value="${p.precio_venta||0}"></div>
+      <div class="field"><label>Costo</label><input id="f-costo" type="number" value="${p.costo||0}"></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Stock</label><input id="f-stock" type="number" value="${p.stock||0}"></div>
+      <div class="field"><label>Stock mínimo</label><input id="f-min" type="number" value="${p.stock_minimo||0}"></div>
+    </div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveProducto(${p.id||'null'})">Guardar</button>`);
+}
+async function saveProducto(id){
+  const payload={
+    tipo:$('f-tipo').value, codigo:$('f-codigo').value.trim(), unidad:$('f-unidad').value.trim(),
+    nombre:$('f-nombre').value.trim(), precio_venta:+$('f-precio').value, costo:+$('f-costo').value,
+    stock:+$('f-stock').value, stock_minimo:+$('f-min').value
+  };
+  if(!payload.nombre){alert('El nombre es obligatorio');return;}
+  const q = id? sb.from('productos').update(payload).eq('id',id) : sb.from('productos').insert(payload);
+  const {error}=await q;
+  if(error){alert(error.message);return;}
+  closeModal(); PAGES.productos();
+}
+
+// ----- STOCK -----
+PAGES.stock=async ()=>{
+  loading();
+  const {data}=await sb.from('productos').select('*').eq('tipo','producto').order('nombre');
+  const rows=(data||[]).map(p=>{
+    const bajo=Number(p.stock)<=Number(p.stock_minimo);
+    return `<tr><td>${p.nombre}</td><td>${p.stock} ${p.unidad||''}</td><td>${p.stock_minimo}</td>
+      <td>${bajo?'<span class="tag pend">Reponer</span>':'<span class="tag ok">OK</span>'}</td>
+      <td>${esAdmin()?`<button class="btn btn-ghost btn-sm" onclick='ajusteStock(${JSON.stringify(p)})'>Ajustar</button>`:'—'}</td></tr>`;
+  }).join('');
+  content.innerHTML=tableShell('Existencias',['Producto','Stock','Mínimo','Estado',''],rows);
+};
+function ajusteStock(p){
+  openModal('Ajustar stock — '+p.nombre,`
+    <div class="field"><label>Stock actual</label><input value="${p.stock}" disabled></div>
+    <div class="field"><label>Nuevo stock</label><input id="f-nuevo" type="number" value="${p.stock}"></div>
+    <div class="field"><label>Motivo</label><input id="f-motivo" placeholder="Ajuste de inventario"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveAjuste(${p.id},${p.stock})">Guardar</button>`);
+}
+async function saveAjuste(id,anterior){
+  const nuevo=+$('f-nuevo').value, motivo=$('f-motivo').value.trim();
+  if(isNaN(nuevo)||nuevo<0){ alert('El stock no puede ser negativo.'); return; }
+  // Ajuste transaccional en el servidor: actualiza el stock y deja el
+  // movimiento en el libro mayor. Solo admin (validado en Supabase).
+  const {error}=await sb.rpc('ajustar_stock',{
+    p_producto_id:id, p_nuevo_stock:nuevo, p_motivo:motivo||null
+  });
+  if(error){
+    alert(/administrador/i.test(error.message)
+      ? 'Solo un administrador puede ajustar stock.'
+      : 'No se pudo ajustar: '+error.message);
+    return;
+  }
+  closeModal(); PAGES.stock();
+}
+
+// ----- CLIENTES -----
+PAGES.clientes=async ()=>{
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="formCliente()">+ Nuevo</button>`;
+  const {data}=await sb.from('clientes').select('*').order('nombre');
+  const rows=(data||[]).map(c=>`<tr><td>${c.nombre}</td><td>${c.cuit_dni||'—'}</td><td>${c.telefono||'—'}</td>
+    <td>${money(c.saldo_cta_cte)}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick='formCliente(${JSON.stringify(c)})'>Editar</button></td></tr>`).join('');
+  content.innerHTML=tableShell('Clientes',['Nombre','CUIT/DNI','Teléfono','Saldo cta. cte.',''],rows);
+};
+function formCliente(c){c=c||{};
+  openModal(c.id?'Editar cliente':'Nuevo cliente',`
+    <div class="field"><label>Nombre</label><input id="c-nombre" value="${c.nombre||''}"></div>
+    <div class="row2">
+      <div class="field"><label>CUIT/DNI</label><input id="c-cuit" value="${c.cuit_dni||''}"></div>
+      <div class="field"><label>Teléfono</label><input id="c-tel" value="${c.telefono||''}"></div>
+    </div>
+    <div class="field"><label>Email</label><input id="c-email" value="${c.email||''}"></div>
+    <div class="field"><label>Dirección</label><input id="c-dir" value="${c.direccion||''}"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveCliente(${c.id||'null'})">Guardar</button>`);
+}
+async function saveCliente(id){
+  const payload={nombre:$('c-nombre').value.trim(),cuit_dni:$('c-cuit').value.trim(),telefono:$('c-tel').value.trim(),email:$('c-email').value.trim(),direccion:$('c-dir').value.trim()};
+  if(!payload.nombre){alert('El nombre es obligatorio');return;}
+  const q=id?sb.from('clientes').update(payload).eq('id',id):sb.from('clientes').insert(payload);
+  const {error}=await q; if(error){alert(error.message);return;}
+  closeModal(); PAGES.clientes();
+}
+
+// ----- PROVEEDORES -----
+PAGES.proveedores=async ()=>{
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="formProveedor()">+ Nuevo</button>`;
+  const {data}=await sb.from('proveedores').select('*').order('nombre');
+  const rows=(data||[]).map(p=>`<tr><td>${p.nombre}</td><td>${p.cuit||'—'}</td><td>${p.telefono||'—'}</td><td>${p.email||'—'}</td>
+    <td><button class="btn btn-ghost btn-sm" onclick='formProveedor(${JSON.stringify(p)})'>Editar</button></td></tr>`).join('');
+  content.innerHTML=tableShell('Proveedores',['Nombre','CUIT','Teléfono','Email',''],rows);
+};
+function formProveedor(p){p=p||{};
+  openModal(p.id?'Editar proveedor':'Nuevo proveedor',`
+    <div class="field"><label>Nombre</label><input id="p-nombre" value="${p.nombre||''}"></div>
+    <div class="row2">
+      <div class="field"><label>CUIT</label><input id="p-cuit" value="${p.cuit||''}"></div>
+      <div class="field"><label>Teléfono</label><input id="p-tel" value="${p.telefono||''}"></div>
+    </div>
+    <div class="field"><label>Email</label><input id="p-email" value="${p.email||''}"></div>
+    <div class="field"><label>Dirección</label><input id="p-dir" value="${p.direccion||''}"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveProveedor(${p.id||'null'})">Guardar</button>`);
+}
+async function saveProveedor(id){
+  const payload={nombre:$('p-nombre').value.trim(),cuit:$('p-cuit').value.trim(),telefono:$('p-tel').value.trim(),email:$('p-email').value.trim(),direccion:$('p-dir').value.trim()};
+  if(!payload.nombre){alert('El nombre es obligatorio');return;}
+  const q=id?sb.from('proveedores').update(payload).eq('id',id):sb.from('proveedores').insert(payload);
+  const {error}=await q; if(error){alert(error.message);return;}
+  closeModal(); PAGES.proveedores();
+}
+
+// ----- COMPRAS / PRESUPUESTOS / VENTAS / TRABAJOS / COBRANZAS / USUARIOS (placeholders funcionales) -----
+async function simpleList(tabla,titulo,cols,mapRow){
+  loading();
+  const {data}=await sb.from(tabla).select('*').order('creado_en',{ascending:false});
+  const rows=(data||[]).map(mapRow).join('');
+  content.innerHTML=tableShell(titulo,cols,rows);
+}
+
+// ============================================================
+// ===================  MÓDULO COMPRAS  =======================
+// ============================================================
+let CMP_CACHE_PROV=null, CMP_CACHE_ALIC=null, CMP_CACHE_COMP=null, CMP_CACHE_CAJAS=null;
+
+async function cmpCargarCatalogos(){
+  if(!CMP_CACHE_PROV){
+    const {data}=await sb.from('proveedores').select('id,nombre').order('nombre');
+    CMP_CACHE_PROV=data||[];
+  }
+  if(!CMP_CACHE_ALIC){
+    const {data}=await sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id');
+    CMP_CACHE_ALIC=data||[];
+  }
+  if(!CMP_CACHE_COMP){
+    const {data}=await sb.from('tipos_comprobante').select('id,nombre,letra,discrimina_iva').eq('activo',true).order('id');
+    CMP_CACHE_COMP=data||[];
+  }
+  if(!CMP_CACHE_CAJAS){
+    const {data}=await sb.from('cajas').select('id,nombre').eq('activo',true).order('id');
+    CMP_CACHE_CAJAS=data||[];
+  }
+}
+
+// -------------------- LISTADO --------------------
+const CMP_FILT={prov:'',num:'',desde:'',hasta:'',fact:'',estado:'',pago:''};
+
+PAGES.compras=async ()=>{
+  loading();
+  await cmpCargarCatalogos();
+  topActions.innerHTML=`<button class="btn" onclick="cmpNueva()">+ Nueva compra</button>`;
+  content.innerHTML=`
+    <div class="cmp-filters">
+      <div class="field"><label>Proveedor</label>
+        <select id="cf-prov"><option value="">Todos</option>
+          ${CMP_CACHE_PROV.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}</select></div>
+      <div class="field sm"><label>N° comprobante</label><input id="cf-num" placeholder="Buscar…"></div>
+      <div class="field sm"><label>Desde</label><input id="cf-desde" type="date"></div>
+      <div class="field sm"><label>Hasta</label><input id="cf-hasta" type="date"></div>
+      <div class="field sm"><label>Facturada</label>
+        <select id="cf-fact"><option value="">Todas</option><option value="true">Facturada</option><option value="false">Sin facturar</option></select></div>
+      <div class="field sm"><label>Estado</label>
+        <select id="cf-estado"><option value="">Todos</option><option value="borrador">Borrador</option><option value="confirmada">Confirmada</option><option value="anulada">Anulada</option></select></div>
+      <div class="field sm"><label>Pago</label>
+        <select id="cf-pago"><option value="">Todos</option><option value="pagado">Pagada</option><option value="parcial">Parcial</option><option value="pendiente">Pendiente</option></select></div>
+      <button class="btn btn-sm" onclick="cmpAplicarFiltros()">Filtrar</button>
+      <button class="btn btn-ghost btn-sm" onclick="cmpLimpiarFiltros()">Limpiar</button>
+    </div>
+    <div id="cmp-list"><div class="loading">Cargando…</div></div>`;
+  // restaurar valores de filtro
+  $('cf-prov').value=CMP_FILT.prov; $('cf-num').value=CMP_FILT.num;
+  $('cf-desde').value=CMP_FILT.desde; $('cf-hasta').value=CMP_FILT.hasta;
+  $('cf-fact').value=CMP_FILT.fact; $('cf-estado').value=CMP_FILT.estado; $('cf-pago').value=CMP_FILT.pago;
+  $('cf-num').addEventListener('keydown',e=>{ if(e.key==='Enter') cmpAplicarFiltros(); });
+  await cmpRenderList();
+};
+
+function cmpAplicarFiltros(){
+  CMP_FILT.prov=$('cf-prov').value; CMP_FILT.num=$('cf-num').value.trim();
+  CMP_FILT.desde=$('cf-desde').value; CMP_FILT.hasta=$('cf-hasta').value;
+  CMP_FILT.fact=$('cf-fact').value; CMP_FILT.estado=$('cf-estado').value; CMP_FILT.pago=$('cf-pago').value;
+  cmpRenderList();
+}
+function cmpLimpiarFiltros(){
+  Object.keys(CMP_FILT).forEach(k=>CMP_FILT[k]='');
+  ['cf-prov','cf-num','cf-desde','cf-hasta','cf-fact','cf-estado','cf-pago'].forEach(id=>{const e=$(id); if(e) e.value='';});
+  cmpRenderList();
+}
+
+async function cmpRenderList(){
+  const box=$('cmp-list'); if(!box) return;
+  box.innerHTML='<div class="loading">Cargando…</div>';
+  let q=sb.from('compras')
+    .select('id,fecha,numero_factura,facturada,condicion_pago,neto,iva,total,estado,estado_pago,proveedor_id,tipo_comprobante_id')
+    .order('creado_en',{ascending:false});
+  if(CMP_FILT.prov)  q=q.eq('proveedor_id',CMP_FILT.prov);
+  if(CMP_FILT.num)   q=q.ilike('numero_factura','%'+CMP_FILT.num+'%');
+  if(CMP_FILT.desde) q=q.gte('fecha',CMP_FILT.desde);
+  if(CMP_FILT.hasta) q=q.lte('fecha',CMP_FILT.hasta);
+  if(CMP_FILT.fact)  q=q.eq('facturada',CMP_FILT.fact==='true');
+  if(CMP_FILT.estado)q=q.eq('estado',CMP_FILT.estado);
+  if(CMP_FILT.pago)  q=q.eq('estado_pago',CMP_FILT.pago);
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  const provName=id=>{const p=CMP_CACHE_PROV.find(x=>x.id===id);return p?p.nombre:'—';};
+  const compName=id=>{const c=CMP_CACHE_COMP.find(x=>x.id===id);return c?c.nombre:'—';};
+  const estTag=e=>e==='confirmada'?'<span class="tag ok">Confirmada</span>':e==='anulada'?'<span class="tag pend">Anulada</span>':'<span class="tag warn">Borrador</span>';
+  const pagoTag=p=>p==='pagado'?'<span class="tag ok">Pagada</span>':p==='parcial'?'<span class="tag warn">Parcial</span>':'<span class="tag pend">Pendiente</span>';
+  const factTag=f=>f?'<span class="tag ok">Facturada</span>':'<span class="tag warn">Sin factura</span>';
+  const rows=(data||[]).map(c=>`<tr style="cursor:pointer" onclick="cmpVer(${c.id})">
+    <td>${c.fecha}</td>
+    <td>${provName(c.proveedor_id)}</td>
+    <td>${compName(c.tipo_comprobante_id)}${c.numero_factura?'<br><span style="color:var(--muted);font-size:11px">'+c.numero_factura+'</span>':''}</td>
+    <td>${c.condicion_pago==='cta_cte'?'Cta. cte.':'Contado'}</td>
+    <td>${factTag(c.facturada)}</td>
+    <td class="cmp-num">${money(c.neto)}</td>
+    <td class="cmp-num">${money(c.iva)}</td>
+    <td class="cmp-num" style="font-weight:600">${money(c.total)}</td>
+    <td>${estTag(c.estado)}</td>
+    <td>${pagoTag(c.estado_pago)}</td>
+  </tr>`).join('');
+  box.innerHTML=tableShell('Compras',
+    ['Fecha','Proveedor','Comprobante','Pago','Fiscal','Neto','IVA','Total','Estado','Estado pago'],rows);
+};
+// -------------------- NUEVA COMPRA --------------------
+let CMP_ESTADO=null;   // estado del formulario en edición
+let CMP_LINE_SEQ=0;
+
+function cmpEsAdmin(){ return currentProfile && currentProfile.rol==='admin'; }
+
+async function cmpNueva(){
+  await cmpCargarCatalogos();
+  CMP_ESTADO={
+    id:null, facturada:true, lineas:[]
+  };
+  cmpRenderForm();
+  cmpAddLinea();
+}
+
+function cmpRenderForm(){
+  pageTitle.textContent='Nueva compra';
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('compras')">← Volver al listado</button>`;
+  const alicOpts=CMP_CACHE_ALIC.map(a=>`<option value="${a.id}" data-pct="${a.porcentaje}">${a.nombre}</option>`).join('');
+  // comprobantes: si no facturada, sólo "Sin comprobante"
+  const compFiscales=CMP_CACHE_COMP.filter(c=>c.letra!=='X'||c.nombre==='Remito');
+  const compNoFisc=CMP_CACHE_COMP.filter(c=>c.nombre==='Sin comprobante');
+  const compOpts=(CMP_ESTADO.facturada?compFiscales:compNoFisc)
+    .map(c=>`<option value="${c.id}" data-disc="${c.discrimina_iva}">${c.nombre}</option>`).join('');
+
+  content.innerHTML=`
+    <div id="cmp-msg"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Datos de la compra</h3>
+        <div class="cmp-toggle" style="width:220px" id="cmp-facttoggle">
+          <button class="${CMP_ESTADO.facturada?'on':''}" onclick="cmpSetFacturada(true)">Facturada</button>
+          ${cmpEsAdmin()?`<button class="${!CMP_ESTADO.facturada?'on':''}" onclick="cmpSetFacturada(false)">Sin facturación</button>`:''}
+        </div>
+      </div>
+      <div style="padding:18px">
+        ${!CMP_ESTADO.facturada?`<div class="cmp-banner nofact">⚠ Operación NO facturada — no genera IVA crédito fiscal. Sólo registro interno.</div>`:''}
+        <div class="cmp-head">
+          <div class="field"><label>Proveedor *</label>
+            <select id="cmp-prov"><option value="">Elegí proveedor…</option>
+              ${CMP_CACHE_PROV.map(p=>`<option value="${p.id}">${p.nombre}</option>`).join('')}</select></div>
+          <div class="field"><label>Fecha</label><input id="cmp-fecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+          <div class="field"><label>Tipo de comprobante${CMP_ESTADO.facturada?' *':''}</label>
+            <select id="cmp-comp" ${!CMP_ESTADO.facturada?'disabled':''} onchange="cmpRecalcular()">${compOpts}</select></div>
+          <div class="field"><label>N° de comprobante</label><input id="cmp-num" placeholder="0001-00001234" ${!CMP_ESTADO.facturada?'disabled':''}></div>
+          <div class="field"><label>Condición de pago</label>
+            <select id="cmp-cond" onchange="cmpToggleCaja()"><option value="contado">Contado</option><option value="cta_cte">Cuenta corriente</option></select></div>
+          <div class="field" id="cmp-caja-wrap"><label>Caja (pago) *</label>
+            <select id="cmp-caja">${CMP_CACHE_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+        </div>
+        <div class="field" style="margin-top:4px"><label>Observaciones</label><input id="cmp-notas" placeholder="Opcional"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Productos</h3>
+        <button class="btn btn-sm" onclick="cmpAddLinea()">+ Agregar línea</button></div>
+      <div style="padding:14px 18px">
+        <table class="cmp-lines" id="cmp-lines-tbl">
+          <thead><tr>
+            <th style="width:32%">Producto</th>
+            <th style="width:10%">Cantidad</th>
+            <th style="width:15%">${CMP_ESTADO.facturada?'Costo neto unit.':'Costo unit.'}</th>
+            ${CMP_ESTADO.facturada?'<th style="width:13%">Alícuota IVA</th>':''}
+            <th style="width:12%" class="cmp-num">Neto</th>
+            ${CMP_ESTADO.facturada?'<th style="width:10%" class="cmp-num">IVA</th>':''}
+            <th style="width:12%" class="cmp-num">Total</th>
+            <th style="width:4%"></th>
+          </tr></thead>
+          <tbody id="cmp-lines-body"></tbody>
+        </table>
+      </div>
+      <div class="cmp-totals">
+        <div class="tt"><div class="k">Neto</div><div class="v" id="cmp-tot-neto">$0,00</div></div>
+        ${CMP_ESTADO.facturada?'<div class="tt"><div class="k">IVA</div><div class="v" id="cmp-tot-iva">$0,00</div></div>':''}
+        <div class="tt total"><div class="k">Total</div><div class="v" id="cmp-tot-total">$0,00</div></div>
+      </div>
+      <div style="padding:16px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="cmpGuardar('borrador')">Guardar borrador</button>
+        <button class="btn" onclick="cmpGuardar('confirmar')">Confirmar compra</button>
+      </div>
+    </div>`;
+  // pintar líneas ya existentes en estado
+  cmpRenderLineas();
+  cmpToggleCaja();
+  const alicDefault=CMP_CACHE_ALIC.find(a=>a.porcentaje==21);
+  CMP_ESTADO._alicDefault = alicDefault?alicDefault.id:(CMP_CACHE_ALIC[0]&&CMP_CACHE_ALIC[0].id);
+}
+
+function cmpSetFacturada(v){
+  if(v===CMP_ESTADO.facturada) return;
+  CMP_ESTADO.facturada=v;
+  cmpRenderForm();
+  if(!CMP_ESTADO.lineas.length) cmpAddLinea();
+}
+
+function cmpToggleCaja(){
+  const cond=$('cmp-cond'); const wrap=$('cmp-caja-wrap');
+  if(!cond||!wrap) return;
+  wrap.style.display = cond.value==='contado' ? '' : 'none';
+}
+
+// -------- líneas --------
+function cmpAddLinea(){
+  const alicDefault=CMP_CACHE_ALIC.find(a=>a.porcentaje==21);
+  CMP_ESTADO.lineas.push({
+    uid:++CMP_LINE_SEQ, producto_id:null, texto:'', cantidad:1,
+    costo:0, alicuota_id:alicDefault?alicDefault.id:(CMP_CACHE_ALIC[0]?CMP_CACHE_ALIC[0].id:null),
+    info:''
+  });
+  cmpRenderLineas();
+}
+function cmpDelLinea(uid){
+  CMP_ESTADO.lineas=CMP_ESTADO.lineas.filter(l=>l.uid!==uid);
+  if(!CMP_ESTADO.lineas.length) cmpAddLinea(); else cmpRenderLineas();
+}
+
+function cmpRenderLineas(){
+  const body=$('cmp-lines-body'); if(!body) return;
+  const fact=CMP_ESTADO.facturada;
+  const alicOpts=(sel)=>CMP_CACHE_ALIC.map(a=>`<option value="${a.id}" ${a.id===sel?'selected':''}>${a.nombre}</option>`).join('');
+  body.innerHTML=CMP_ESTADO.lineas.map(l=>{
+    const calc=cmpCalcLinea(l);
+    return `<tr data-uid="${l.uid}">
+      <td>
+        <div class="cmp-prodwrap">
+          <input placeholder="Código o nombre…" value="${(l.texto||'').replace(/"/g,'&quot;')}"
+            oninput="cmpBuscarProd(${l.uid},this.value)" onfocus="cmpBuscarProd(${l.uid},this.value)" autocomplete="off">
+          <div class="cmp-prodhits" id="cmp-hits-${l.uid}"></div>
+        </div>
+        ${l.info?`<div class="cmp-prodinfo">${l.info}</div>`:''}
+      </td>
+      <td><input type="number" min="0" step="1" value="${l.cantidad}" class="cmp-num" oninput="cmpUpd(${l.uid},'cantidad',this.value)"></td>
+      <td><input type="number" min="0" step="0.01" value="${l.costo}" class="cmp-num" oninput="cmpUpd(${l.uid},'costo',this.value)"></td>
+      ${fact?`<td><select onchange="cmpUpd(${l.uid},'alicuota_id',this.value)">${alicOpts(l.alicuota_id)}</select></td>`:''}
+      <td class="cmp-num"><input readonly value="${money(calc.neto)}"></td>
+      ${fact?`<td class="cmp-num"><input readonly value="${money(calc.iva)}"></td>`:''}
+      <td class="cmp-num"><input readonly value="${money(calc.total)}" style="font-weight:600"></td>
+      <td><button class="cmp-delrow" onclick="cmpDelLinea(${l.uid})" title="Eliminar">×</button></td>
+    </tr>`;
+  }).join('');
+  cmpRenderTotales();
+}
+
+// Cálculo por línea según facturación y comprobante.
+// - No facturada: neto = total = costo*cant, iva 0.
+// - Facturada A (discrimina): costo es NETO -> se suma IVA.
+// - Facturada B/C (no discrimina): costo es TOTAL -> neto hacia atrás.
+function cmpCalcLinea(l){
+  const cant=Number(l.cantidad)||0, costo=Number(l.costo)||0;
+  const base=cant*costo;
+  if(!CMP_ESTADO.facturada){ return {neto:base, iva:0, total:base}; }
+  const alic=CMP_CACHE_ALIC.find(a=>a.id===Number(l.alicuota_id));
+  const pct=alic?Number(alic.porcentaje):0;
+  const comp=CMP_CACHE_COMP.find(c=>c.id===Number($('cmp-comp')?.value));
+  const discrimina = comp? comp.discrimina_iva : true;
+  if(pct===0){ return {neto:base, iva:0, total:base}; }
+  if(discrimina){
+    const neto=base, iva=base*pct/100; return {neto, iva, total:neto+iva};
+  } else {
+    // costo ingresado es total con IVA (B/C)
+    const total=base, neto=total/(1+pct/100); return {neto, iva:total-neto, total};
+  }
+}
+
+function cmpUpd(uid,campo,val){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(!l) return;
+  l[campo]=val;
+  // sólo recalcular números sin repintar todo (para no perder foco)
+  const tr=document.querySelector(`tr[data-uid="${uid}"]`);
+  if(tr){
+    const calc=cmpCalcLinea(l);
+    const fact=CMP_ESTADO.facturada;
+    const readonlys=tr.querySelectorAll('input[readonly]');
+    // orden: neto, [iva], total
+    let i=0;
+    readonlys[i++].value=money(calc.neto);
+    if(fact) readonlys[i++].value=money(calc.iva);
+    readonlys[i++].value=money(calc.total);
+  }
+  cmpRenderTotales();
+}
+function cmpRecalcular(){ cmpRenderLineas(); }
+
+function cmpRenderTotales(){
+  let neto=0,iva=0,total=0;
+  CMP_ESTADO.lineas.forEach(l=>{ const c=cmpCalcLinea(l); neto+=c.neto; iva+=c.iva; total+=c.total; });
+  const en=$('cmp-tot-neto'), ei=$('cmp-tot-iva'), et=$('cmp-tot-total');
+  if(en) en.textContent=money(neto);
+  if(ei) ei.textContent=money(iva);
+  if(et) et.textContent=money(total);
+}
+
+// -------- búsqueda de producto por línea (código o nombre) --------
+let CMP_BUSCA_T=null;
+function cmpBuscarProd(uid,q){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(l) l.texto=q;
+  const box=$('cmp-hits-'+uid); if(!box) return;
+  if(!q||q.trim().length<2){ box.classList.remove('show'); box.innerHTML=''; return; }
+  clearTimeout(CMP_BUSCA_T);
+  CMP_BUSCA_T=setTimeout(async ()=>{
+    const term=q.trim();
+    // 1) por código/equivalencia (RPC existente)  2) por nombre/código (tabla)
+    const [rpc,tabla]=await Promise.all([
+      sb.rpc('buscar_por_codigo',{q:term}),
+      sb.from('productos').select('id,codigo,nombre,stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva')
+        .or(`nombre.ilike.%${term}%,codigo.ilike.%${term}%`).limit(8)
+    ]);
+    const vistos=new Set(); const items=[];
+    (rpc.data||[]).forEach(r=>{ if(r.producto_id&&!vistos.has(r.producto_id)){ vistos.add(r.producto_id);
+      items.push({id:r.producto_id,codigo:r.codigo_wega,nombre:r.aplicacion||r.codigo_wega,stock:r.stock}); }});
+    (tabla.data||[]).forEach(r=>{ if(!vistos.has(r.id)){ vistos.add(r.id);
+      items.push({id:r.id,codigo:r.codigo,nombre:r.nombre,stock:r.stock,
+        ucn:r.ultimo_costo_neto,ucf:r.ultimo_costo_final,ualic:r.ultima_alicuota_iva}); }});
+    if(!items.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
+    box.innerHTML=items.slice(0,10).map(it=>`<div class="cmp-prodhit" onclick='cmpElegirProd(${uid},${JSON.stringify(it).replace(/'/g,"&#39;")})'>
+        <b>${it.codigo||'—'}</b> · ${it.nombre||''} <span style="color:var(--muted)">(stock ${Number(it.stock)||0})</span></div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+
+async function cmpElegirProd(uid,it){
+  const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(!l) return;
+  l.producto_id=it.id;
+  l.texto=(it.codigo?it.codigo+' · ':'')+(it.nombre||'');
+  // si no vinieron los costos (caso RPC), traerlos
+  let ucn=it.ucn, ucf=it.ucf, ualic=it.ualic, stock=it.stock;
+  if(ucn===undefined){
+    const {data}=await sb.from('productos').select('stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva,alicuota_iva_venta_id').eq('id',it.id).single();
+    if(data){ ucn=data.ultimo_costo_neto; ucf=data.ultimo_costo_final; ualic=data.ultima_alicuota_iva; stock=data.stock; }
+  }
+  l.info=`Stock actual: <b>${Number(stock)||0}</b> · Últ. costo neto: <b>${money(ucn||0)}</b> · Últ. costo final: <b>${money(ucf||0)}</b> · Alíc. habitual: <b>${ualic||0}%</b>`;
+  // proponer costo y alícuota habituales si están vacíos
+  if((!l.costo||Number(l.costo)===0) && ucn) l.costo=ucn;
+  if(ualic){ const a=CMP_CACHE_ALIC.find(x=>Number(x.porcentaje)===Number(ualic)); if(a) l.alicuota_id=a.id; }
+  const box=$('cmp-hits-'+uid); if(box){ box.classList.remove('show'); box.innerHTML=''; }
+  cmpRenderLineas();
+}
+
+// -------- guardar / confirmar --------
+async function cmpGuardar(accion){
+  const msg=$('cmp-msg');
+  const setMsg=(t,tipo)=>{ msg.innerHTML=`<div class="msg ${tipo}">${t}</div>`; msg.scrollIntoView({behavior:'smooth',block:'nearest'}); };
+  // validaciones frontend
+  const proveedor_id=Number($('cmp-prov').value)||null;
+  if(!proveedor_id){ setMsg('Elegí un proveedor.','error'); return; }
+  const facturada=CMP_ESTADO.facturada;
+  const tipo_comprobante_id=Number($('cmp-comp').value)||null;
+  if(facturada && !tipo_comprobante_id){ setMsg('Elegí el tipo de comprobante.','error'); return; }
+  const condicion_pago=$('cmp-cond').value;
+  const caja_id = condicion_pago==='contado' ? (Number($('cmp-caja').value)||null) : null;
+  if(condicion_pago==='contado' && !caja_id){ setMsg('Elegí la caja de la que sale el pago.','error'); return; }
+  const lineasValidas=CMP_ESTADO.lineas.filter(l=>l.producto_id && Number(l.cantidad)>0 && Number(l.costo)>0);
+  if(!lineasValidas.length){ setMsg('Agregá al menos una línea con producto, cantidad y costo.','error'); return; }
+
+  // permiso frontend (el candado real está en SQL)
+  if(!facturada && !cmpEsAdmin()){ setMsg('Sólo un administrador puede registrar compras sin facturación.','error'); return; }
+
+  const btns=document.querySelectorAll('.cmp-totals ~ div button'); btns.forEach(b=>b.disabled=true);
+  setMsg('Guardando…','ok');
+
+  // 1) cabecera en borrador
+  const cab={
+    proveedor_id, fecha:$('cmp-fecha').value||new Date().toISOString().slice(0,10),
+    facturada, naturaleza: facturada?'fiscal':'interna',
+    tipo_comprobante_id: facturada?tipo_comprobante_id:(CMP_CACHE_COMP.find(c=>c.nombre==='Sin comprobante')||{}).id,
+    numero_factura: facturada ? ($('cmp-num').value.trim()||null) : null,
+    condicion_pago, notas:$('cmp-notas').value.trim()||null,
+    estado:'borrador', creado_por: currentUser.id
+  };
+  const {data:compraIns,error:e1}=await sb.from('compras').insert(cab).select('id').single();
+  if(e1){
+    btns.forEach(b=>b.disabled=false);
+    if(e1.code==='23505') return setMsg('Ya existe una compra con ese número para este proveedor.','error');
+    return setMsg('Error al guardar la compra: '+e1.message,'error');
+  }
+  const compra_id=compraIns.id;
+
+  // 2) items. En A guardamos neto_unitario; en B/C guardamos subtotal (total) y neto_unitario 0.
+  const comp=CMP_CACHE_COMP.find(c=>c.id===tipo_comprobante_id);
+  const discrimina = facturada ? (comp?comp.discrimina_iva:true) : false;
+  const items=lineasValidas.map(l=>{
+    const cant=Number(l.cantidad), costo=Number(l.costo);
+    const base=cant*costo;
+    const row={ compra_id, producto_id:l.producto_id, cantidad:cant,
+      alicuota_iva_id: facturada ? Number(l.alicuota_id)||null : null };
+    if(facturada && !discrimina){
+      // B/C: el costo es total con IVA -> mando subtotal, neto en 0 para que la función lo calcule
+      row.neto_unitario=0; row.costo_unitario=0; row.subtotal=base;
+    } else {
+      // A o no facturada: costo es neto unitario
+      row.neto_unitario=costo; row.costo_unitario=costo; row.subtotal=base;
+    }
+    return row;
+  });
+  const {error:e2}=await sb.from('compra_items').insert(items);
+  if(e2){
+    btns.forEach(b=>b.disabled=false);
+    return setMsg('La compra se creó (borrador) pero falló al cargar los productos: '+e2.message+'. Podés retomarla desde el listado.','error');
+  }
+
+  if(accion==='borrador'){
+    setMsg('Borrador guardado. Podés confirmarlo más tarde desde el listado.','ok');
+    setTimeout(()=>go('compras'),900);
+    return;
+  }
+
+  // 3) confirmar (transaccional en el servidor)
+  const {error:e3}=await sb.rpc('confirmar_compra',{ p_compra_id:compra_id, p_caja_id: caja_id });
+  if(e3){
+    btns.forEach(b=>b.disabled=false);
+    // mensajes claros según el raise de la función
+    let m=e3.message||'Error al confirmar.';
+    if(/administrador/i.test(m)) m='Sólo un administrador puede registrar compras sin facturación.';
+    else if(/requiere una caja/i.test(m)) m='Falta elegir la caja para el pago de contado.';
+    else if(/ya está confirmada/i.test(m)) m='Esta compra ya estaba confirmada.';
+    return setMsg('No se pudo confirmar: '+m+' (la compra quedó en borrador).','error');
+  }
+  setMsg('✓ Compra confirmada. Stock, costos y caja actualizados.','ok');
+  setTimeout(()=>go('compras'),1000);
+}
+
+// -------------------- VER COMPRA (detalle) --------------------
+async function cmpVer(id){
+  await cmpCargarCatalogos();
+  const [{data:c},{data:items}]=await Promise.all([
+    sb.from('compras').select('*').eq('id',id).single(),
+    sb.from('compra_items').select('*').eq('compra_id',id)
+  ]);
+  if(!c) return;
+  const prov=CMP_CACHE_PROV.find(p=>p.id===c.proveedor_id);
+  const comp=CMP_CACHE_COMP.find(x=>x.id===c.tipo_comprobante_id);
+  // traer nombres de producto
+  const ids=[...new Set((items||[]).map(i=>i.producto_id).filter(Boolean))];
+  let prods={};
+  if(ids.length){ const {data:pr}=await sb.from('productos').select('id,codigo,nombre').in('id',ids);
+    (pr||[]).forEach(p=>prods[p.id]=p); }
+  const fact=c.facturada;
+  const filas=(items||[]).map(i=>{
+    const p=prods[i.producto_id]||{};
+    return `<tr><td>${p.codigo||'—'} ${p.nombre||''}</td><td class="cmp-num">${i.cantidad}</td>
+      <td class="cmp-num">${money(i.neto_subtotal)}</td>
+      ${fact?`<td class="cmp-num">${i.alicuota_iva}%</td><td class="cmp-num">${money(i.iva_monto)}</td>`:''}
+      <td class="cmp-num" style="font-weight:600">${money(i.subtotal)}</td></tr>`;
+  }).join('');
+  const puedeConfirmar=c.estado==='borrador';
+  const puedeAnular=c.estado==='confirmada' && cmpEsAdmin();
+  pageTitle.textContent='Compra #'+c.id;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('compras')">← Volver</button>`;
+  content.innerHTML=`
+    <div id="cmp-msg"></div>
+    <div class="panel" style="margin-bottom:16px"><div style="padding:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Proveedor</div><div>${prov?prov.nombre:'—'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Fecha</div><div>${c.fecha}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Comprobante</div><div>${comp?comp.nombre:'—'} ${c.numero_factura||''}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Fiscal</div><div>${fact?'<span class="tag ok">Facturada</span>':'<span class="tag warn">Sin factura</span>'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Pago</div><div>${c.condicion_pago==='cta_cte'?'Cuenta corriente':'Contado'}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Estado</div><div>${c.estado}</div></div>
+      <div><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Estado pago</div><div>${c.estado_pago}</div></div>
+      ${c.notas?`<div style="grid-column:1/-1"><div class="k" style="color:var(--muted);font-size:11px;text-transform:uppercase">Observaciones</div><div>${c.notas}</div></div>`:''}
+    </div></div>
+    <div class="panel">
+      <div class="panel-head"><h3>Detalle</h3></div>
+      <table class="cmp-lines"><thead><tr><th>Producto</th><th class="cmp-num">Cant.</th><th class="cmp-num">Neto</th>
+        ${fact?'<th class="cmp-num">Alíc.</th><th class="cmp-num">IVA</th>':''}<th class="cmp-num">Total</th></tr></thead>
+        <tbody>${filas}</tbody></table>
+      <div class="cmp-totals">
+        <div class="tt"><div class="k">Neto</div><div class="v">${money(c.neto)}</div></div>
+        ${fact?`<div class="tt"><div class="k">IVA</div><div class="v">${money(c.iva)}</div></div>`:''}
+        <div class="tt total"><div class="k">Total</div><div class="v">${money(c.total)}</div></div>
+      </div>
+      ${(puedeConfirmar||puedeAnular)?`<div style="padding:16px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end">
+        ${puedeConfirmar?`<button class="btn" onclick="cmpConfirmarExistente(${c.id},'${c.condicion_pago}')">Confirmar compra</button>`:''}
+        ${puedeAnular?`<button class="btn btn-ghost" onclick="cmpAnular(${c.id})">Anular compra</button>`:''}
+      </div>`:''}
+    </div>`;
+}
+
+async function cmpConfirmarExistente(id,cond){
+  const msg=$('cmp-msg'); const setMsg=(t,tipo)=>msg.innerHTML=`<div class="msg ${tipo}">${t}</div>`;
+  let caja_id=null;
+  if(cond==='contado'){
+    // pedir caja con un modal simple
+    const cajaOpts=CMP_CACHE_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('');
+    openModal('Confirmar compra',`<div class="field"><label>¿De qué caja sale el pago?</label><select id="mk-caja">${cajaOpts}</select></div>`,
+      `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="cmpDoConfirm(${id})">Confirmar</button>`);
+    return;
+  }
+  await cmpDoConfirm(id,null);
+}
+async function cmpDoConfirm(id){
+  const caja=$('mk-caja')? Number($('mk-caja').value):null;
+  closeModal();
+  const {error}=await sb.rpc('confirmar_compra',{p_compra_id:id,p_caja_id:caja});
+  const msg=$('cmp-msg');
+  if(error){ if(msg) msg.innerHTML=`<div class="msg error">No se pudo confirmar: ${error.message}</div>`; return; }
+  cmpVer(id);
+}
+async function cmpAnular(id){
+  if(!confirm('¿Anular esta compra? Se revertirá el stock y la deuda generada.')) return;
+  const {error}=await sb.rpc('anular_compra',{p_compra_id:id});
+  const msg=$('cmp-msg');
+  if(error){ if(msg) msg.innerHTML=`<div class="msg error">No se pudo anular: ${error.message}</div>`; return; }
+  cmpVer(id);
+}
+
+PAGES.presupuestos=async ()=>{
+  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nuevo presupuesto (próximo)</button>`;
+  await simpleList('presupuestos','Presupuestos',['Fecha','Estado','Total',''],
+    p=>`<tr><td>${p.fecha}</td><td><span class="tag warn">${p.estado}</span></td><td>${money(p.total)}</td><td></td></tr>`);
+};
+PAGES.ventas=async ()=>{
+  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nueva venta (próximo)</button>`;
+  await simpleList('ventas','Ventas',['Fecha','Forma pago','Estado','Total'],
+    v=>`<tr><td>${v.fecha}</td><td>${v.forma_pago}</td><td><span class="tag ${v.estado_pago==='pagado'?'ok':'pend'}">${v.estado_pago}</span></td><td>${money(v.total)}</td></tr>`);
+};
+PAGES.trabajos=async ()=>{
+  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nuevo trabajo (próximo)</button>`;
+  await simpleList('trabajos','Trabajos realizados',['Fecha','Descripción','Estado',''],
+    t=>`<tr><td>${t.fecha}</td><td>${t.descripcion}</td><td><span class="tag ok">${t.estado}</span></td><td></td></tr>`);
+};
+PAGES.cobranzas=async ()=>{
+  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Registrar cobro (próximo)</button>`;
+  await simpleList('cobranzas','Cobranzas',['Fecha','Medio','Monto',''],
+    c=>`<tr><td>${c.fecha}</td><td>${c.medio}</td><td>${money(c.monto)}</td><td></td></tr>`);
+};
+PAGES.usuarios=async ()=>{
+  loading();
+  const {data}=await sb.from('perfiles').select('*').order('creado_en');
+  const rows=(data||[]).map(u=>{
+    const rolTag=`<span class="tag ${u.rol==='admin'?'warn':'ok'}">${u.rol}</span>`;
+    const estTag=u.activo?'<span class="tag ok">Activo</span>':'<span class="tag pend">Inactivo</span>';
+    const acc = esAdmin()
+      ? `<button class="btn btn-ghost btn-sm" onclick='usrEditar(${JSON.stringify(u)})'>Gestionar</button>`
+      : '—';
+    return `<tr><td>${u.nombre}</td><td>${rolTag}</td><td>${estTag}</td><td>${acc}</td></tr>`;
+  }).join('');
+  content.innerHTML=tableShell('Usuarios del sistema',['Nombre','Rol','Estado',''],rows)+
+    (esAdmin()?'':'<div style="color:var(--muted);font-size:12px;margin-top:12px">Solo un administrador puede cambiar roles o desactivar usuarios.</div>');
+};
+
+function usrEditar(u){
+  openModal('Gestionar — '+u.nombre,`
+    <div class="field"><label>Rol</label>
+      <select id="usr-rol">
+        <option value="empleado" ${u.rol==='empleado'?'selected':''}>Empleado</option>
+        <option value="admin" ${u.rol==='admin'?'selected':''}>Administrador</option>
+      </select></div>
+    <div class="field"><label>Estado</label>
+      <select id="usr-activo">
+        <option value="true" ${u.activo?'selected':''}>Activo</option>
+        <option value="false" ${!u.activo?'selected':''}>Inactivo</option>
+      </select></div>
+    <div id="usr-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="usrGuardar('${u.id}')">Guardar</button>`);
+}
+
+async function usrGuardar(id){
+  const rol=$('usr-rol').value, activo=$('usr-activo').value==='true';
+  const {error}=await sb.rpc('admin_set_usuario',{p_perfil_id:id,p_rol:rol,p_activo:activo});
+  if(error){
+    let m=error.message||'Error';
+    if(/sin ning/i.test(m)) m='No podés dejar el sistema sin ningún administrador activo.';
+    else if(/administrador/i.test(m)) m='Solo un administrador puede hacer este cambio.';
+    $('usr-msg').innerHTML=`<div class="msg error">${m}</div>`; return;
+  }
+  closeModal(); PAGES.usuarios();
+}
+
+// ----- BUSCADOR (por vehículo o por código) -----
+let BUSCADOR_MODO='vehiculo';
+const BUS={marca:null,modelo:null,motor:null,anio:null,vista:'ficha'};
+let BUS_MARCAS=null, BUS_MODELOS=[], BUS_VERSIONES=[], BUS_ANIOS=[], BUS_FILTROS=[];
+let CART=[];
+
+PAGES.buscador=async ()=>{
+  content.innerHTML=`
+    <div class="panel" style="margin-bottom:18px">
+      <div style="padding:0 18px;border-bottom:1px solid var(--line);display:flex;gap:2px">
+        <button id="tab-veh" class="btab" onclick="setModo('vehiculo')">Por vehículo</button>
+        <button id="tab-cod" class="btab" onclick="setModo('codigo')">Por código / equivalencia</button>
+      </div>
+      <div style="padding:20px" id="bform"></div>
+    </div>
+    <div id="bres"></div>
+    <div id="cart-bar"></div>`;
+  setModo(BUSCADOR_MODO);
+  renderCart();
+};
+function setModo(m){
+  BUSCADOR_MODO=m;
+  const tv=$('tab-veh'), tc=$('tab-cod');
+  if(tv&&tc){ tv.classList.toggle('on',m==='vehiculo'); tc.classList.toggle('on',m==='codigo'); }
+  $('bres').innerHTML='';
+  if(m==='vehiculo') formVehiculo(); else formCodigo();
+}
+
+// ============ MODO VEHÍCULO: cascada marca > modelo > motor > año ============
+async function formVehiculo(){
+  $('bform').innerHTML=`
+    <div class="bus-grid">
+      <div class="field" style="margin:0">
+        <label>1. Marca</label>
+        <input id="bus-marca" class="bus-input" placeholder="Escribí una marca…" autocomplete="off"
+               value="${BUS.marca||''}" oninput="busFiltrarMarcas(this.value)" onfocus="busFiltrarMarcas(this.value)">
+        <div class="bus-drop" id="bus-marca-drop"></div>
+      </div>
+      <div class="field" style="margin:0">
+        <label>2. Modelo</label>
+        <select id="bus-modelo" onchange="busSetModelo(this.value)" ${BUS.marca?'':'disabled'}></select>
+      </div>
+      <div class="field" style="margin:0">
+        <label>3. Motor / versión</label>
+        <select id="bus-motor" onchange="busSetMotor(this.value)" ${BUS.modelo?'':'disabled'}></select>
+      </div>
+      <div class="field" style="margin:0">
+        <label>4. Año</label>
+        <select id="bus-anio" onchange="busSetAnio(this.value)" ${BUS.modelo?'':'disabled'}></select>
+      </div>
+    </div>
+    <div class="bus-actions">
+      <span id="bus-sel" class="bus-sel"></span>
+      <span style="flex:1"></span>
+      <div class="cmp-toggle" style="width:200px">
+        <button id="v-ficha" class="${BUS.vista==='ficha'?'on':''}" onclick="busVista('ficha')">Ficha</button>
+        <button id="v-tabla" class="${BUS.vista==='tabla'?'on':''}" onclick="busVista('tabla')">Tabla</button>
+      </div>
+      <button class="btn btn-ghost btn-sm" onclick="busLimpiar()">Limpiar</button>
+    </div>`;
+  if(!BUS_MARCAS){
+    const {data}=await sb.rpc('cat_marcas');
+    BUS_MARCAS=data||[];
+  }
+  if(BUS.marca){ await busCargarModelos(); }
+  busInfo();
+}
+
+function busFiltrarMarcas(q){
+  const box=$('bus-marca-drop'); if(!box||!BUS_MARCAS) return;
+  const t=(q||'').toLowerCase().trim();
+  const arr=BUS_MARCAS.filter(m=>m.marca.toLowerCase().includes(t)).slice(0,40);
+  if(!arr.length){ box.innerHTML='<div class="bus-opt" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
+  box.innerHTML=arr.map(m=>`<div class="bus-opt" onclick="busSetMarca(${JSON.stringify(m.marca).replace(/"/g,'&quot;')})">
+      <span>${m.marca}</span><span class="bus-badge">${m.filtros} filtros</span></div>`).join('');
+  box.classList.add('show');
+}
+async function busSetMarca(m){
+  BUS.marca=m; BUS.modelo=null; BUS.motor=null; BUS.anio=null;
+  const inp=$('bus-marca'); if(inp) inp.value=m;
+  const box=$('bus-marca-drop'); if(box){ box.classList.remove('show'); box.innerHTML=''; }
+  await busCargarModelos();
+  busBuscar();
+}
+async function busCargarModelos(){
+  const sel=$('bus-modelo'); if(!sel) return;
+  sel.disabled=true; sel.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca});
+  BUS_MODELOS=data||[];
+  sel.innerHTML='<option value="">Todos los modelos</option>'+
+    BUS_MODELOS.map(m=>`<option value="${(m.modelo||'').replace(/"/g,'&quot;')}" ${BUS.modelo===m.modelo?'selected':''}>${m.modelo} (${m.filtros})</option>`).join('');
+  sel.disabled=false;
+  const sm=$('bus-motor'), sa=$('bus-anio');
+  if(sm){ sm.innerHTML='<option value="">Todos los motores</option>'; sm.disabled=!BUS.modelo; }
+  if(sa){ sa.innerHTML='<option value="">Todos los años</option>'; sa.disabled=!BUS.modelo; }
+  if(BUS.modelo) await busCargarVersiones();
+  busInfo();
+}
+async function busSetModelo(v){
+  BUS.modelo=v||null; BUS.motor=null; BUS.anio=null;
+  if(BUS.modelo){ await busCargarVersiones(); }
+  else { const sm=$('bus-motor'), sa=$('bus-anio');
+         if(sm){sm.innerHTML='<option value="">Todos los motores</option>';sm.disabled=true;}
+         if(sa){sa.innerHTML='<option value="">Todos los años</option>';sa.disabled=true;} }
+  busInfo(); busBuscar();
+}
+async function busCargarVersiones(){
+  const sm=$('bus-motor'); if(!sm) return;
+  sm.disabled=true; sm.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_versiones',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  BUS_VERSIONES=data||[];
+  sm.innerHTML='<option value="">Todos los motores</option>'+
+    BUS_VERSIONES.map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor} (${v.filtros})</option>`).join('');
+  sm.disabled=false;
+  await busCargarAnios();
+}
+async function busSetMotor(v){
+  BUS.motor=v||null; BUS.anio=null;
+  await busCargarAnios(); busInfo(); busBuscar();
+}
+async function busCargarAnios(){
+  const sa=$('bus-anio'); if(!sa) return;
+  sa.disabled=true; sa.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cat_anios',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor});
+  BUS_ANIOS=data||[];
+  sa.innerHTML='<option value="">Todos los años</option>'+
+    BUS_ANIOS.map(a=>`<option value="${a.anio}">${a.anio} (${a.filtros})</option>`).join('');
+  sa.disabled=false;
+}
+function busSetAnio(v){ BUS.anio=v?Number(v):null; busInfo(); busBuscar(); }
+function busVista(v){
+  BUS.vista=v;
+  const a=$('v-ficha'), b=$('v-tabla');
+  if(a&&b){ a.classList.toggle('on',v==='ficha'); b.classList.toggle('on',v==='tabla'); }
+  busBuscar();
+}
+function busLimpiar(){
+  BUS.marca=null;BUS.modelo=null;BUS.motor=null;BUS.anio=null;
+  BUS_MODELOS=[];BUS_VERSIONES=[];BUS_ANIOS=[];BUS_FILTROS=[];
+  formVehiculo(); $('bres').innerHTML='';
+}
+function busInfo(){
+  const el=$('bus-sel'); if(!el) return;
+  if(!BUS.marca){ el.textContent='Elegí una marca para empezar'; return; }
+  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean);
+  el.innerHTML='Vehículo: <b style="color:var(--text)">'+partes.join(' · ')+'</b>';
+}
+
+async function busBuscar(){
+  if(!BUS.marca) return;
+  if(BUS.vista==='tabla') return busTabla();
+  const box=$('bres'); box.innerHTML='<div class="loading">Buscando filtros…</div>';
+  const {data,error}=await sb.rpc('cat_filtros',
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_anio:BUS.anio});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  BUS_FILTROS=data||[];
+  if(!BUS_FILTROS.length){
+    box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para esa combinación.<br>'+
+      '<span style="font-size:12px">Probá quitando el año o el motor para ampliar la búsqueda.</span></div></div>'; return; }
+  const grupos={};
+  BUS_FILTROS.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
+  const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
+  const partes=[BUS.marca,BUS.modelo,BUS.motor,BUS.anio].filter(Boolean).join(' ');
+  box.innerHTML=`
+    <div class="veh-card">
+      <div class="veh-card-t">Vehículo seleccionado</div>
+      <div class="veh-card-n">${partes}</div>
+      <div class="veh-card-s">${BUS_FILTROS.length} producto(s) aplicable(s)</div>
+      <button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar todos</button>
+    </div>`+
+    ord.map(([tipo,g])=>`
+      <div class="panel" style="margin-bottom:14px">
+        <div class="panel-head"><h3>${tipo} <span style="color:var(--muted);font-weight:400;font-size:13px">(${g.items.length})</span></h3></div>
+        <div class="filtro-list">
+        ${g.items.map(r=>`
+          <div class="filtro-row">
+            <div class="filtro-main">
+              <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
+              <div class="filtro-desc">${r.descripcion||''}</div>
+              <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}${r.anio_incierto?' <span class="tag warn">año no especificado</span>':''}</div>
+            </div>
+            <div class="filtro-meta">
+              ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
+              ${r.ubicacion?`<span class="filtro-ubi">${r.ubicacion}</span>`:''}
+              <span class="filtro-precio">${money(r.precio)}</span>
+              <button class="btn btn-sm" onclick='cartAdd(${JSON.stringify(r).replace(/'/g,"&#39;")})'>Agregar</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>`).join('');
+  renderCart();
+}
+
+async function busTabla(){
+  const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
+  const {data,error}=await sb.rpc('cat_tabla',{p_marca:BUS.marca,p_modelo:BUS.modelo});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">Sin aplicaciones cargadas.</div></div>'; return; }
+  const cel=(v)=>v?v.split(', ').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>'):'<span style="color:var(--muted)">—</span>';
+  box.innerHTML=`<div class="panel">
+    <div class="panel-head"><h3>Catálogo — ${BUS.marca}${BUS.modelo?' '+BUS.modelo:''}</h3>
+      <span style="color:var(--muted);font-size:12px">${data.length} aplicaciones</span></div>
+    <div class="tabla-wrap">
+    <table class="cat-tabla">
+      <thead><tr><th>Modelo</th><th>Motor</th><th>Año</th><th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th><th>Otros</th></tr></thead>
+      <tbody>${data.map(r=>`<tr>
+        <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
+        <td data-l="Motor">${r.motor||'—'}</td>
+        <td data-l="Año">${r.anio||'—'}</td>
+        <td data-l="Aire">${cel(r.aire)}</td>
+        <td data-l="Aceite">${cel(r.aceite)}</td>
+        <td data-l="Combustible">${cel(r.combustible)}</td>
+        <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
+        <td data-l="Otros">${cel(r.otros)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div></div>`;
+}
+
+// ---- detalle de producto ----
+async function verProducto(id){
+  const {data:p}=await sb.from('productos')
+    .select('id,codigo,nombre,descripcion,precio_venta,stock,stock_minimo,unidad,ubicacion,tipo_filtro_id').eq('id',id).single();
+  if(!p) return;
+  const {data:eq}=await sb.from('equivalencias').select('marca_id,codigo').eq('producto_id',id).limit(20);
+  openModal(p.codigo||'Producto',`
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">${p.nombre||''}</div>
+    ${p.descripcion?`<div style="color:var(--muted);font-size:13px;margin-bottom:12px">${p.descripcion}</div>`:''}
+    <div class="row2">
+      <div class="field"><label>Precio</label><input value="${money(p.precio_venta)}" disabled></div>
+      <div class="field"><label>Stock</label><input value="${Number(p.stock)||0} ${p.unidad||''}" disabled></div>
+    </div>
+    <div class="field"><label>Ubicación</label><input value="${p.ubicacion||'— sin asignar —'}" disabled></div>
+    ${eq&&eq.length?`<div class="field"><label>Equivalencias</label>
+      <div style="font-size:12px;color:var(--muted);line-height:1.7">${eq.map(e=>e.codigo).join(' · ')}</div></div>`:''}
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>
+     <button class="btn" onclick='cartAdd(${JSON.stringify({producto_id:p.id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio_venta,stock:p.stock}).replace(/'/g,"&#39;")});closeModal()'>Agregar a la venta</button>`);
+}
+async function verProductoPorCodigo(cod){
+  const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
+  if(data&&data[0]) verProducto(data[0].id);
+}
+
+// ============ CARRITO ============
+function cartAdd(r){
+  const id=r.producto_id;
+  const ya=CART.find(x=>x.producto_id===id);
+  if(ya){ ya.cantidad++; } else {
+    CART.push({producto_id:id,codigo:r.codigo,descripcion:r.descripcion,
+               precio:Number(r.precio)||0,stock:Number(r.stock)||0,cantidad:1});
+  }
+  renderCart();
+}
+function cartAddTodos(){ BUS_FILTROS.forEach(r=>cartAdd(r)); }
+function cartDel(id){ CART=CART.filter(x=>x.producto_id!==id); renderCart(); }
+function cartQty(id,v){ const l=CART.find(x=>x.producto_id===id); if(l) l.cantidad=Math.max(1,Number(v)||1); renderCart(); }
+function cartTotal(){ return CART.reduce((s,l)=>s+l.precio*l.cantidad,0); }
+function renderCart(){
+  const bar=$('cart-bar'); if(!bar) return;
+  if(!CART.length){ bar.innerHTML=''; return; }
+  bar.innerHTML=`<div class="cart-bar">
+      <div><b>${CART.length}</b> producto(s) · <b style="color:var(--amber)">${money(cartTotal())}</b></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost btn-sm" onclick="cartVer()">Ver selección</button>
+        <button class="btn btn-sm" onclick="ventaRapida()">Crear venta</button>
+      </div>
+    </div>`;
+}
+function cartVer(){
+  openModal('Selección',`
+    <table class="cmp-lines"><thead><tr><th>Producto</th><th>Cant.</th><th class="cmp-num">Subtotal</th><th></th></tr></thead>
+    <tbody>${CART.map(l=>`<tr>
+      <td><b>${l.codigo||''}</b><div style="font-size:11px;color:var(--muted)">${l.descripcion||''}</div></td>
+      <td style="width:80px"><input type="number" min="1" value="${l.cantidad}" onchange="cartQty(${l.producto_id},this.value)"></td>
+      <td class="cmp-num">${money(l.precio*l.cantidad)}</td>
+      <td><button class="cmp-delrow" onclick="cartDel(${l.producto_id});cartVer()">×</button></td>
+    </tr>`).join('')}</tbody></table>
+    <div style="text-align:right;margin-top:12px;font-size:18px">Total: <b style="color:var(--amber)">${money(cartTotal())}</b></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Seguir buscando</button>
+     <button class="btn" onclick="closeModal();ventaRapida()">Crear venta</button>`);
+}
+
+// ============ VENTA RÁPIDA ============
+let VR_CLI=null, VR_CAJ=null, VR_ALI=null, VR_CMP=null;
+async function ventaRapida(){
+  if(!CART.length){ alert('No hay productos seleccionados.'); return; }
+  if(!VR_CLI){
+    const [c,k,a,t]=await Promise.all([
+      sb.from('clientes').select('id,nombre').order('nombre'),
+      sb.from('cajas').select('id,nombre').eq('activo',true).order('id'),
+      sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id'),
+      sb.from('tipos_comprobante').select('id,nombre,letra,discrimina_iva').eq('activo',true).order('id')
+    ]);
+    VR_CLI=c.data||[]; VR_CAJ=k.data||[]; VR_ALI=a.data||[]; VR_CMP=t.data||[];
+  }
+  const a21=VR_ALI.find(x=>Number(x.porcentaje)===21)||VR_ALI[0];
+  openModal('Nueva venta',`
+    <div id="vr-msg"></div>
+    <div class="field"><label>Cliente</label>
+      <select id="vr-cli"><option value="">Consumidor final</option>
+        ${VR_CLI.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    <div class="row2">
+      <div class="field"><label>Condición</label>
+        <select id="vr-cond" onchange="vrToggle()">
+          <option value="contado">Contado</option><option value="cta_cte">Cuenta corriente</option></select></div>
+      <div class="field" id="vr-caja-w"><label>Caja</label>
+        <select id="vr-caja">${VR_CAJ.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Facturación</label>
+        <select id="vr-fact" onchange="vrToggle()"><option value="si">Facturada</option><option value="no">Sin facturar</option></select></div>
+      <div class="field" id="vr-comp-w"><label>Comprobante</label>
+        <select id="vr-comp">${VR_CMP.filter(c=>c.nombre!=='Sin comprobante').map(c=>`<option value="${c.id}" data-d="${c.discrimina_iva}">${c.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Alícuota IVA</label>
+      <select id="vr-alic">${VR_ALI.map(x=>`<option value="${x.id}" ${a21&&x.id===a21.id?'selected':''}>${x.nombre}</option>`).join('')}</select></div>
+    <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px">
+      ${CART.length} producto(s) — Total estimado <b style="color:var(--amber)">${money(cartTotal())}</b>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
+    </div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" id="vr-ok" onclick="vrGuardar()">Registrar venta</button>`);
+  vrToggle();
+}
+function vrToggle(){
+  const cond=$('vr-cond'), cw=$('vr-caja-w'), f=$('vr-fact'), pw=$('vr-comp-w');
+  if(cond&&cw) cw.style.display = cond.value==='contado'?'':'none';
+  if(f&&pw)    pw.style.display = f.value==='si'?'':'none';
+}
+async function vrGuardar(){
+  const m=$('vr-msg');
+  const set=(t,tp)=>{ if(m) m.innerHTML=`<div class="msg ${tp}">${t}</div>`; };
+  const cliente_id=Number($('vr-cli').value)||null;
+  const forma_pago=$('vr-cond').value;
+  const facturada=$('vr-fact').value==='si';
+  const caja_id=forma_pago==='contado'?(Number($('vr-caja').value)||null):null;
+  const comp_id=facturada?(Number($('vr-comp').value)||null):null;
+  const alic_id=Number($('vr-alic').value)||null;
+  if(forma_pago==='contado'&&!caja_id){ set('Elegí la caja.','error'); return; }
+  if(forma_pago==='cta_cte'&&!cliente_id){ set('Para cuenta corriente elegí un cliente.','error'); return; }
+  if(facturada&&!comp_id){ set('Elegí el comprobante.','error'); return; }
+
+  const btn=$('vr-ok'); if(btn) btn.disabled=true;
+  set('Registrando…','ok');
+
+  const cab={cliente_id, fecha:new Date().toISOString().slice(0,10),
+    facturada, naturaleza:facturada?'fiscal':'interna', tipo_comprobante_id:comp_id,
+    forma_pago, estado_pago: forma_pago==='cta_cte'?'pendiente':'pagado',
+    notas:'Venta rápida desde Buscador', creado_por:currentUser.id};
+  const {data:v,error:e1}=await sb.from('ventas').insert(cab).select('id').single();
+  if(e1){ if(btn) btn.disabled=false; set('No se pudo crear la venta: '+e1.message,'error'); return; }
+
+  const comp=VR_CMP.find(c=>c.id===comp_id);
+  const discrimina = facturada ? (comp?comp.discrimina_iva:true) : false;
+  const items=CART.map(l=>{
+    const base=l.precio*l.cantidad;
+    const row={venta_id:v.id, producto_id:l.producto_id, descripcion:l.codigo||l.descripcion||null,
+      cantidad:l.cantidad, precio_unitario:l.precio,
+      alicuota_iva_id: facturada?alic_id:null, subtotal:base};
+    row.neto_unitario = (facturada && !discrimina) ? 0 : l.precio;
+    return row;
+  });
+  const {error:e2}=await sb.from('venta_items').insert(items);
+  if(e2){ if(btn) btn.disabled=false; set('La venta se creó pero fallaron los ítems: '+e2.message,'error'); return; }
+
+  const {error:e3}=await sb.rpc('registrar_venta',{p_venta_id:v.id,p_caja_id:caja_id});
+  if(e3){ if(btn) btn.disabled=false;
+    set('No se pudo registrar: '+(/caja/i.test(e3.message)?'falta elegir la caja.':e3.message),'error'); return; }
+
+  CART=[]; renderCart();
+  set('✓ Venta #'+v.id+' registrada. Stock y '+(forma_pago==='cta_cte'?'cuenta corriente':'caja')+' actualizados.','ok');
+  setTimeout(()=>{ closeModal(); },1400);
+}
+
+// ============ MODO CÓDIGO ============
+function formCodigo(){
+  $('bform').innerHTML=`
+    <div class="field" style="margin:0">
+      <label>Código Wega, OEM, FRAM o MANN</label>
+      <input id="bq" type="text" placeholder="Ej: FAP-0001  ·  C 2678  ·  CA 5737  ·  7701039528" autocomplete="off" style="font-size:15px;padding:12px 14px">
+    </div>
+    <div style="color:var(--muted);font-size:12px;margin-top:8px">
+      Pegá el código que trae el cliente y encontrá el filtro Wega con todas sus equivalencias.
+    </div>`;
+  const inp=$('bq'); inp.focus();
+  let t=null;
+  inp.addEventListener('input',()=>{ clearTimeout(t); t=setTimeout(()=>buscarCodigo(inp.value.trim()),300); });
+}
+async function buscarCodigo(q){
+  const box=$('bres');
+  if(!q||q.length<2){ box.innerHTML=''; return; }
+  box.innerHTML='<div class="loading">Buscando…</div>';
+  const {data,error}=await sb.rpc('buscar_por_codigo',{q});
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">No se encontró ningún filtro con el código "'+q+'".</div></div>'; return; }
+  box.innerHTML=`<div style="color:var(--muted);font-size:13px;margin-bottom:14px">${data.length} resultado(s)</div>
+    <div class="panel"><table>
+      <thead><tr><th>Código Wega</th><th>Tipo</th><th>Aplicación</th><th>Equivalencias</th><th style="text-align:right">Stock</th><th style="text-align:right">Precio</th><th></th></tr></thead>
+      <tbody>${data.map(r=>`<tr>
+        <td style="font-weight:600;white-space:nowrap"><a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo_wega}</a></td>
+        <td><span class="tag ok">${r.tipo}</span></td>
+        <td style="font-size:12px">${r.aplicacion||''}</td>
+        <td style="color:var(--muted);font-size:12px">${r.equivalencias||'—'}</td>
+        <td style="text-align:right">${Number(r.stock)>0?Number(r.stock):'<span class="tag pend">Sin stock</span>'}</td>
+        <td style="text-align:right;color:var(--amber);font-weight:600;white-space:nowrap">${money(r.precio)}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick="verProducto(${r.producto_id})">Ver</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+
+// ----- CONFIGURACIÓN -----
+PAGES.config=async ()=>{
+  loading();
+  const {data}=await sb.from('configuracion').select('*').eq('clave','margen_general').single();
+  const margen=data?data.valor:'40';
+  content.innerHTML=`
+    <div class="panel" style="max-width:520px">
+      <div class="panel-head"><h3>Margen de venta</h3></div>
+      <div style="padding:22px">
+        <p style="color:var(--muted);margin-bottom:18px;font-size:13px">
+          El precio de venta de cada producto se calcula como <b>costo + margen</b>.
+          Al guardar un nuevo margen, se recalculan los precios de venta de todo el catálogo.
+        </p>
+        <div class="field"><label>Margen general (%)</label>
+          <input id="cfg-margen" type="number" value="${margen}" min="0" step="1" style="max-width:160px">
+        </div>
+        <div id="cfg-preview" style="color:var(--muted);font-size:13px;margin:8px 0 18px"></div>
+        <button class="btn" onclick="guardarMargen()">Guardar y recalcular precios</button>
+        <div id="cfg-msg" style="margin-top:14px"></div>
+      </div>
+    </div>`;
+  const inp=$('cfg-margen'), prev=$('cfg-preview');
+  const upd=()=>{ const m=Number(inp.value)||0; const ej=Math.round(14562*(1+m/100));
+    prev.innerHTML=`Ejemplo: un filtro con costo ${money(14562)} se vendería a <b style="color:var(--amber)">${money(ej)}</b>`; };
+  inp.addEventListener('input',upd); upd();
+};
+async function guardarMargen(){
+  const m=Number($('cfg-margen').value);
+  const msg=$('cfg-msg');
+  if(isNaN(m)||m<0){ msg.innerHTML='<div class="msg error">Ingresá un margen válido (0 o más).</div>'; return; }
+  msg.innerHTML='<div style="color:var(--muted);font-size:13px">Recalculando precios de todo el catálogo…</div>';
+  // guardar el margen
+  await sb.from('configuracion').update({valor:String(m),actualizado_en:new Date().toISOString()}).eq('clave','margen_general');
+  // recalcular precios: precio_venta = round(costo * (1+m/100)) para todos los productos
+  const factor=1+m/100;
+  const {error}=await sb.rpc('recalcular_precios',{factor});
+  if(error){ msg.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  msg.innerHTML='<div class="msg ok">Listo. Precios actualizados con un margen del '+m+'%.</div>';
+}
+
+// cerrar modal al click fuera
+overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal();});
+</script>
+</body>
+</html>
