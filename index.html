@@ -350,6 +350,24 @@ select:disabled{opacity:.5}
 .trb-sug:last-child{border-bottom:none}
 .trb-sug:hover{background:var(--panel-2)}
 .trb-sug input{margin-top:3px;flex-shrink:0}
+
+/* ---- FASE 3: cobranzas y caja ---- */
+.cob-deuda{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 14px;margin-bottom:14px}
+.cob-deuda-h{display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:8px;font-size:13px;flex-wrap:wrap;gap:8px}
+.caj-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+.caj-card{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--line);
+  border-radius:var(--radius);padding:18px 20px}
+.caj-card.abierta{border-left-color:var(--ok)}
+.caj-nombre{font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.caj-saldo{font-family:'Barlow Condensed';font-size:32px;font-weight:700;color:var(--amber);margin:2px 0 10px}
+.caj-sub{font-size:11px;color:var(--muted);margin-top:5px;line-height:1.6}
+.caj-resumen{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px}
+.caj-resumen > div{display:flex;justify-content:space-between;padding:4px 0;font-size:13px}
+.cc-pend{margin:0 0 4px;padding:14px 18px;border-bottom:1px solid var(--line)}
+.cc-pend-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--amber);margin-bottom:8px}
+@media(max-width:860px){ .caj-grid{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -425,6 +443,7 @@ const MENU = [
   {id:'ventas',     label:'Ventas',       ic:'▲'},
   {id:'trabajos',   label:'Trabajos',     ic:'✚'},
   {id:'cobranzas',  label:'Cobranzas',    ic:'$'},
+  {id:'caja',       label:'Caja',         ic:'▦'},
   {id:'clientes',   label:'Clientes',     ic:'◍'},
   {id:'proveedores',label:'Proveedores',  ic:'◐'},
   {id:'usuarios',   label:'Usuarios',     ic:'◯'},
@@ -683,12 +702,64 @@ async function cliFicha(id){
       </div>
     </div>
 
-    <div class="panel">
+    <div class="panel" style="margin-bottom:16px">
       <div class="panel-head"><h3>Vehículos</h3>
         <button class="btn btn-sm" onclick="formVehiculoCliente(${c.id})">+ Agregar vehículo</button></div>
       <div id="cli-vehs"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Cuenta corriente</h3>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:13px;color:var(--muted)">Saldo:
+            <b style="color:${Number(c.saldo)>0?'var(--danger)':'var(--ok)'}">${money(c.saldo)}</b></span>
+          ${Number(c.saldo)>0?`<button class="btn btn-sm" onclick="cobNueva(${c.id})">Registrar cobranza</button>`:''}
+        </div></div>
+      <div id="cli-cc"><div class="loading">Cargando…</div></div>
     </div>`;
   pintarVehiculos(vehs||[], c.id);
+  cliCuentaCorriente(c.id);
+}
+
+// ---------- CUENTA CORRIENTE DEL CLIENTE ----------
+async function cliCuentaCorriente(cliente_id){
+  const box=$('cli-cc'); if(!box) return;
+  const [{data:mov,error},{data:deudas}]=await Promise.all([
+    sb.rpc('cuenta_corriente_cliente',{p_cliente_id:cliente_id}),
+    sb.from('cuentas_cobrar')
+      .select('venta_id,monto_original,saldo,estado,ventas(fecha)')
+      .eq('cliente_id',cliente_id).order('creado_en')
+  ]);
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if((!mov||!mov.length)&&(!deudas||!deudas.length)){
+    box.innerHTML='<div class="empty">Este cliente no tiene movimientos en cuenta corriente.</div>'; return; }
+
+  const pendientes=(deudas||[]).filter(d=>Number(d.saldo)>0);
+  box.innerHTML=`
+    ${pendientes.length?`
+      <div class="cc-pend">
+        <div class="cc-pend-t">Comprobantes con saldo</div>
+        <table class="cmp-lines"><thead><tr>
+          <th>Comprobante</th><th>Fecha</th><th class="cmp-num">Original</th>
+          <th class="cmp-num">Saldo</th><th>Estado</th></tr></thead>
+        <tbody>${pendientes.map(d=>`<tr>
+          <td>Venta #${d.venta_id||'—'}</td>
+          <td>${d.ventas?d.ventas.fecha:'—'}</td>
+          <td class="cmp-num">${money(d.monto_original)}</td>
+          <td class="cmp-num" style="font-weight:600;color:var(--danger)">${money(d.saldo)}</td>
+          <td><span class="tag ${d.estado==='parcial'?'warn':'pend'}">${d.estado}</span></td>
+        </tr>`).join('')}</tbody></table>
+      </div>`:''}
+    <table><thead><tr><th>Fecha</th><th>Concepto</th><th>Ref.</th>
+      <th class="cmp-num">Debe</th><th class="cmp-num">Haber</th><th class="cmp-num">Saldo</th></tr></thead>
+      <tbody>${(mov||[]).map(m=>`<tr>
+        <td>${m.fecha||'—'}</td>
+        <td>${m.concepto}</td>
+        <td style="color:var(--muted)">${m.referencia||''}</td>
+        <td class="cmp-num">${Number(m.debe)>0?money(m.debe):'—'}</td>
+        <td class="cmp-num" style="color:var(--ok)">${Number(m.haber)>0?money(m.haber):'—'}</td>
+        <td class="cmp-num" style="font-weight:600">${money(m.saldo)}</td>
+      </tr>`).join('')}</tbody></table>`;
 }
 
 function pintarVehiculos(vehs, cliente_id){
@@ -1942,11 +2013,429 @@ async function trbDoFacturar(id){
   setTimeout(()=>{ closeModal(); trbFicha(id); },1200);
 }
 
+// ----- COBRANZAS -----
+const COB_MEDIOS=[
+  {v:'efectivo',      t:'Efectivo'},
+  {v:'tarjeta',       t:'Tarjeta'},
+  {v:'transferencia', t:'Transferencia'},
+  {v:'cheque',        t:'Cheque'},
+  {v:'mercadopago',   t:'Mercado Pago'}
+];
+let COB_CAJAS=null, COB_DEUDAS=[], COB_CLIENTE=null;
+
+async function cobCargarCajas(){
+  if(!COB_CAJAS){
+    const {data}=await sb.from('cajas').select('id,nombre').eq('activo',true).order('id');
+    COB_CAJAS=data||[];
+  }
+  return COB_CAJAS;
+}
+
 PAGES.cobranzas=async ()=>{
-  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Registrar cobro (próximo)</button>`;
-  await simpleList('cobranzas','Cobranzas',['Fecha','Medio','Monto',''],
-    c=>`<tr><td>${c.fecha}</td><td>${c.medio}</td><td>${money(c.monto)}</td><td></td></tr>`);
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="cobNueva()">+ Registrar cobranza</button>`;
+  const {data,error}=await sb.from('cobranzas')
+    .select('id,fecha,monto,medio,notas,cliente_id,caja_id')
+    .order('creado_en',{ascending:false}).limit(200);
+  if(error){ content.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+
+  // clientes con deuda, para el resumen de arriba
+  const {data:deudores}=await sb.from('cuentas_cobrar')
+    .select('cliente_id,saldo').gt('saldo',0);
+  const totalDeuda=(deudores||[]).reduce((s,d)=>s+Number(d.saldo||0),0);
+  const nDeudores=new Set((deudores||[]).map(d=>d.cliente_id)).size;
+
+  let cli={}, caj={};
+  const cid=[...new Set((data||[]).map(c=>c.cliente_id).filter(Boolean))];
+  if(cid.length){ const {data:cs}=await sb.from('clientes').select('id,nombre').in('id',cid);
+    (cs||[]).forEach(x=>cli[x.id]=x.nombre); }
+  (await cobCargarCajas()).forEach(x=>caj[x.id]=x.nombre);
+  const medioT=(v)=>(COB_MEDIOS.find(m=>m.v===v)||{t:v}).t;
+
+  const rows=(data||[]).map(c=>`<tr style="cursor:pointer" onclick="cobVer(${c.id})">
+    <td>${c.fecha}</td>
+    <td>${cli[c.cliente_id]||'—'}</td>
+    <td><span class="tag ok">${medioT(c.medio)}</span></td>
+    <td>${caj[c.caja_id]||'—'}</td>
+    <td>${c.notas||''}</td>
+    <td class="cmp-num" style="font-weight:600;color:var(--ok)">${money(c.monto)}</td>
+  </tr>`).join('');
+
+  content.innerHTML=`
+    <div class="stats">
+      <div class="stat"><div class="k">Cuentas por cobrar</div>
+        <div class="v ${totalDeuda>0?'danger':'ok'}">${money(totalDeuda)}</div></div>
+      <div class="stat"><div class="k">Clientes con deuda</div><div class="v">${nDeudores}</div></div>
+      <div class="stat"><div class="k">Cobranzas registradas</div><div class="v ok">${(data||[]).length}</div></div>
+    </div>
+    ${tableShell('Cobranzas',['Fecha','Cliente','Medio','Caja','Notas','Monto'],rows)}`;
 };
+
+// ---------- alta de cobranza ----------
+async function cobNueva(cliente_id){
+  await cobCargarCajas();
+  const {data:cls}=await sb.rpc('buscar_clientes',{q:null,p_solo_activos:true});
+  const conDeuda=(cls||[]).filter(c=>Number(c.saldo)>0);
+  openModal('Registrar cobranza',`
+    <div class="field"><label>Cliente *</label>
+      <select id="cb-cli" onchange="cobCargarDeuda(this.value)">
+        <option value="">Elegí un cliente…</option>
+        ${conDeuda.map(c=>`<option value="${c.id}" ${cliente_id==c.id?'selected':''}>${c.nombre} — debe ${money(c.saldo)}</option>`).join('')}
+      </select>
+      ${conDeuda.length?'':'<div style="font-size:11px;color:var(--muted);margin-top:4px">Ningún cliente tiene deuda pendiente.</div>'}
+    </div>
+    <div id="cb-deuda"></div>
+    <div class="row2">
+      <div class="field"><label>Medio de pago *</label>
+        <select id="cb-medio" onchange="cobSugerirCaja()">
+          ${COB_MEDIOS.map(m=>`<option value="${m.v}">${m.t}</option>`).join('')}</select></div>
+      <div class="field"><label>Caja *</label>
+        <select id="cb-caja">${COB_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Monto a cobrar *</label><input id="cb-monto" type="number" min="0" step="0.01" value=""></div>
+      <div class="field"><label>Fecha</label><input id="cb-fecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+    </div>
+    <div class="field"><label>Notas</label><input id="cb-notas" placeholder="Opcional"></div>
+    <div id="cb-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" id="cb-ok" onclick="cobGuardar()">Registrar cobranza</button>`);
+  if(cliente_id) await cobCargarDeuda(cliente_id);
+}
+
+function cobSugerirCaja(){
+  const m=$('cb-medio').value, s=$('cb-caja'); if(!s) return;
+  const buscar = m==='efectivo' ? /efectivo/i
+               : m==='mercadopago' ? /mercado/i
+               : /banco|transferen/i;
+  const op=[...s.options].find(o=>buscar.test(o.textContent));
+  if(op) s.value=op.value;
+}
+
+async function cobCargarDeuda(cliente_id){
+  COB_CLIENTE = Number(cliente_id)||null;
+  const box=$('cb-deuda'); if(!box) return;
+  if(!COB_CLIENTE){ box.innerHTML=''; COB_DEUDAS=[]; return; }
+  box.innerHTML='<div class="loading" style="padding:16px">Cargando deuda…</div>';
+  const {data,error}=await sb.from('cuentas_cobrar')
+    .select('id,venta_id,monto_original,saldo,estado,creado_en,ventas(fecha)')
+    .eq('cliente_id',COB_CLIENTE).gt('saldo',0).order('creado_en');
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  COB_DEUDAS=data||[];
+  const total=COB_DEUDAS.reduce((s,d)=>s+Number(d.saldo),0);
+  if(!COB_DEUDAS.length){
+    box.innerHTML='<div class="msg error">Este cliente no tiene deuda pendiente.</div>'; return; }
+  box.innerHTML=`
+    <div class="cob-deuda">
+      <div class="cob-deuda-h">
+        <span>Deuda pendiente: <b style="color:var(--danger)">${money(total)}</b></span>
+        <label class="cli-chk"><input type="checkbox" id="cb-manual" onchange="cobToggleManual()">
+          Elegir comprobantes</label>
+      </div>
+      <table class="cmp-lines"><thead><tr>
+        <th>Comprobante</th><th>Fecha</th><th class="cmp-num">Original</th>
+        <th class="cmp-num">Saldo</th><th class="cmp-num cb-imp-col" style="display:none">A imputar</th>
+      </tr></thead><tbody>
+      ${COB_DEUDAS.map(d=>`<tr>
+        <td>Venta #${d.venta_id||'—'} <span class="tag ${d.estado==='parcial'?'warn':'pend'}">${d.estado}</span></td>
+        <td>${d.ventas?d.ventas.fecha:'—'}</td>
+        <td class="cmp-num">${money(d.monto_original)}</td>
+        <td class="cmp-num" style="font-weight:600">${money(d.saldo)}</td>
+        <td class="cmp-num cb-imp-col" style="display:none">
+          <input type="number" min="0" step="0.01" value="0" data-cc="${d.id}" data-max="${d.saldo}"
+                 class="cb-imp" oninput="cobRecalcularImput()"></td>
+      </tr>`).join('')}
+      </tbody></table>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px" id="cb-modo">
+        Imputación automática: se cancela primero la deuda más antigua.
+      </div>
+    </div>`;
+  const inp=$('cb-monto'); if(inp && !inp.value) inp.value=total.toFixed(2);
+}
+
+function cobToggleManual(){
+  const manual=$('cb-manual').checked;
+  document.querySelectorAll('.cb-imp-col').forEach(e=>e.style.display=manual?'':'none');
+  $('cb-modo').textContent = manual
+    ? 'Imputación manual: el monto se calcula con lo que asignes a cada comprobante.'
+    : 'Imputación automática: se cancela primero la deuda más antigua.';
+  const inp=$('cb-monto'); if(inp) inp.readOnly=manual;
+  if(manual) cobRecalcularImput();
+}
+function cobRecalcularImput(){
+  let total=0;
+  document.querySelectorAll('.cb-imp').forEach(i=>{
+    const max=Number(i.dataset.max)||0;
+    if(Number(i.value)>max) i.value=max;
+    total+=Number(i.value)||0;
+  });
+  const inp=$('cb-monto'); if(inp) inp.value=total.toFixed(2);
+}
+
+async function cobGuardar(){
+  const m=$('cb-msg');
+  const set=(t,tp)=>{ m.innerHTML=`<div class="msg ${tp}">${t}</div>`; };
+  const cliente_id=Number($('cb-cli').value)||null;
+  if(!cliente_id){ set('Elegí un cliente.','error'); return; }
+  const monto=Number($('cb-monto').value)||0;
+  if(monto<=0){ set('El monto debe ser mayor a cero.','error'); return; }
+  const caja_id=Number($('cb-caja').value)||null;
+  if(!caja_id){ set('Elegí la caja donde entra el cobro.','error'); return; }
+
+  // imputaciones explícitas, si el usuario las eligió
+  let imputaciones=null;
+  if($('cb-manual') && $('cb-manual').checked){
+    imputaciones=[...document.querySelectorAll('.cb-imp')]
+      .map(i=>({cuenta_cobrar_id:Number(i.dataset.cc), monto:Number(i.value)||0}))
+      .filter(x=>x.monto>0);
+    if(!imputaciones.length){ set('Asigná un importe a al menos un comprobante.','error'); return; }
+  }
+
+  const btn=$('cb-ok'); if(btn) btn.disabled=true;
+  set('Registrando…','ok');
+
+  // Toda la lógica (deuda, estado de ventas, saldo del cliente y caja)
+  // la resuelve la RPC en una sola transacción.
+  const {data,error}=await sb.rpc('registrar_cobranza',{
+    p_cliente_id:cliente_id, p_monto:monto, p_caja_id:caja_id,
+    p_medio:$('cb-medio').value, p_fecha:$('cb-fecha').value||null,
+    p_notas:$('cb-notas').value.trim()||null,
+    p_imputaciones: imputaciones
+  });
+  if(error){
+    if(btn) btn.disabled=false;
+    let t=error.message||'Error';
+    if(/supera la deuda/i.test(t))      t='El cobro supera la deuda pendiente del cliente.';
+    else if(/no tiene deuda/i.test(t))  t='Este cliente no tiene deuda pendiente.';
+    else if(/no suman/i.test(t))        t='Las imputaciones no coinciden con el monto cobrado.';
+    else if(/supera el saldo del comprobante/i.test(t)) t='Una imputación supera el saldo de ese comprobante.';
+    else if(/caja/i.test(t))            t='Elegí una caja válida.';
+    set(t,'error'); return;
+  }
+  closeModal();
+  cobVer(data, true);
+}
+
+// ---------- comprobante / detalle ----------
+async function cobVer(id, recien){
+  loading();
+  const [{data:c},{data:imp}]=await Promise.all([
+    sb.from('cobranzas').select('*').eq('id',id).single(),
+    sb.from('cobranza_imputaciones')
+      .select('monto,cuentas_cobrar(venta_id,monto_original,saldo,estado)')
+      .eq('cobranza_id',id)
+  ]);
+  if(!c){ content.innerHTML='<div class="msg error">Cobranza no encontrada.</div>'; return; }
+  const [{data:cli},{data:caja}]=await Promise.all([
+    c.cliente_id? sb.from('clientes').select('nombre,saldo_cta_cte').eq('id',c.cliente_id).single():Promise.resolve({data:null}),
+    c.caja_id? sb.from('cajas').select('nombre,saldo_actual').eq('id',c.caja_id).single():Promise.resolve({data:null})
+  ]);
+  const medioT=(COB_MEDIOS.find(m=>m.v===c.medio)||{t:c.medio}).t;
+  pageTitle.textContent='Cobranza #'+c.id;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('cobranzas')">← Cobranzas</button>`;
+  content.innerHTML=`
+    ${recien?'<div class="msg ok">✓ Cobranza registrada. Deuda, cuenta corriente y caja actualizadas.</div>':''}
+    <div class="veh-card">
+      <div class="veh-card-t">Comprobante de cobranza</div>
+      <div class="veh-card-n">${money(c.monto)}</div>
+      <div class="veh-card-s">${cli?cli.nombre:'—'} · ${medioT} · ${c.fecha}</div>
+    </div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Detalle</h3></div>
+      <div class="ficha-grid">
+        <div><span class="k">Cliente</span><span>${cli?cli.nombre:'—'}</span></div>
+        <div><span class="k">Medio</span><span>${medioT}</span></div>
+        <div><span class="k">Caja</span><span>${caja?caja.nombre:'—'}</span></div>
+        <div><span class="k">Saldo del cliente</span>
+          <span style="color:${cli&&Number(cli.saldo_cta_cte)>0?'var(--danger)':'var(--ok)'}">${cli?money(cli.saldo_cta_cte):'—'}</span></div>
+        <div><span class="k">Saldo de la caja</span><span>${caja?money(caja.saldo_actual):'—'}</span></div>
+        ${c.notas?`<div style="grid-column:1/-1"><span class="k">Notas</span><span>${c.notas}</span></div>`:''}
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Imputado a</h3></div>
+      ${(imp||[]).length?`<table><thead><tr><th>Comprobante</th><th class="cmp-num">Imputado</th>
+        <th class="cmp-num">Saldo restante</th><th>Estado</th></tr></thead>
+        <tbody>${imp.map(i=>`<tr>
+          <td>Venta #${i.cuentas_cobrar?i.cuentas_cobrar.venta_id:'—'}</td>
+          <td class="cmp-num" style="font-weight:600">${money(i.monto)}</td>
+          <td class="cmp-num">${i.cuentas_cobrar?money(i.cuentas_cobrar.saldo):'—'}</td>
+          <td>${i.cuentas_cobrar?`<span class="tag ${i.cuentas_cobrar.estado==='cobrada'?'ok':'warn'}">${i.cuentas_cobrar.estado}</span>`:'—'}</td>
+        </tr>`).join('')}</tbody></table>`
+        :'<div class="empty">Sin imputaciones registradas.</div>'}
+    </div>`;
+}
+
+// ----- CAJA -----
+let CAJ_SEL=null;
+
+PAGES.caja=async ()=>{
+  loading();
+  const {data,error}=await sb.rpc('cajas_estado');
+  if(error){ content.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  topActions.innerHTML = esAdmin()
+    ? `<button class="btn btn-ghost btn-sm" onclick="cajMovimientoManual()">+ Movimiento manual</button>` : '';
+  content.innerHTML=`
+    <div id="caj-msg"></div>
+    <div class="caj-grid">
+      ${(data||[]).map(c=>`
+        <div class="caj-card ${c.sesion_id?'abierta':''}">
+          <div class="caj-nombre">${c.nombre}</div>
+          <div class="caj-saldo">${money(c.saldo_actual)}</div>
+          ${c.sesion_id?`
+            <div class="caj-sesion">
+              <span class="tag ok">Turno abierto</span>
+              <div class="caj-sub">
+                Abrió ${c.abierta_por||'—'} · ${new Date(c.abierta_en).toLocaleString('es-AR')}<br>
+                Inicial ${money(c.saldo_inicial)} · ${c.movimientos} movimiento(s)
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-sm" onclick="cajCerrar(${c.sesion_id},${c.caja_id})">Cerrar turno</button>
+              <button class="btn btn-ghost btn-sm" onclick="cajMovimientos(${c.caja_id},'${(c.nombre||'').replace(/'/g,"\\'")}')">Movimientos</button>
+            </div>`
+          :`
+            <div class="caj-sesion"><span class="tag pend">Sin turno abierto</span>
+              <div class="caj-sub">Los movimientos se registran igual, sin turno asociado.</div></div>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button class="btn btn-sm" onclick="cajAbrir(${c.caja_id},'${(c.nombre||'').replace(/'/g,"\\'")}',${c.saldo_actual})">Abrir turno</button>
+              <button class="btn btn-ghost btn-sm" onclick="cajMovimientos(${c.caja_id},'${(c.nombre||'').replace(/'/g,"\\'")}')">Movimientos</button>
+            </div>`}
+        </div>`).join('')}
+    </div>
+    <div id="caj-detalle" style="margin-top:20px"></div>`;
+};
+
+function cajAbrir(caja_id, nombre, saldo){
+  openModal('Abrir turno — '+nombre,`
+    <div class="field"><label>Saldo inicial</label>
+      <input id="cj-ini" type="number" step="0.01" value="${Number(saldo)||0}">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Por defecto, el saldo actual de la caja.</div></div>
+    <div class="field"><label>Notas</label><input id="cj-notas" placeholder="Ej: turno mañana"></div>
+    <div id="cj-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="cajDoAbrir(${caja_id})">Abrir turno</button>`);
+}
+async function cajDoAbrir(caja_id){
+  const {error}=await sb.rpc('abrir_caja',{
+    p_caja_id:caja_id, p_saldo_inicial:Number($('cj-ini').value)||0,
+    p_notas:$('cj-notas').value.trim()||null});
+  if(error){
+    $('cj-msg').innerHTML='<div class="msg error">'+
+      (/ya tiene un turno/i.test(error.message)?'Esa caja ya tiene un turno abierto.':error.message)+'</div>';
+    return; }
+  closeModal(); PAGES.caja();
+}
+
+async function cajCerrar(sesion_id, caja_id){
+  // resumen del turno (sólo informativo: los totales finales los da la RPC)
+  const {data}=await sb.from('movimientos_caja')
+    .select('tipo,monto').eq('sesion_id',sesion_id);
+  const ing=(data||[]).filter(m=>m.tipo==='ingreso').reduce((s,m)=>s+Number(m.monto),0);
+  const egr=(data||[]).filter(m=>m.tipo==='egreso').reduce((s,m)=>s+Number(m.monto),0);
+  const {data:ses}=await sb.from('caja_sesiones').select('saldo_inicial').eq('id',sesion_id).single();
+  openModal('Cerrar turno',`
+    <div class="caj-resumen">
+      <div><span>Saldo inicial</span><b>${money(ses?ses.saldo_inicial:0)}</b></div>
+      <div><span>Ingresos</span><b style="color:var(--ok)">+${money(ing)}</b></div>
+      <div><span>Egresos</span><b style="color:var(--danger)">−${money(egr)}</b></div>
+    </div>
+    <div class="field" style="margin-top:14px"><label>Saldo contado (declarado) *</label>
+      <input id="cj-dec" type="number" step="0.01" placeholder="Cuánto hay realmente"></div>
+    <div class="field"><label>Notas del cierre</label><input id="cj-cnotas"></div>
+    <div style="font-size:11px;color:var(--muted)">El saldo del sistema y la diferencia los calcula el servidor.</div>
+    <div id="cj-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="cajDoCerrar(${sesion_id})">Cerrar turno</button>`);
+}
+async function cajDoCerrar(sesion_id){
+  const dec=$('cj-dec').value;
+  if(dec===''||isNaN(Number(dec))){ $('cj-msg').innerHTML='<div class="msg error">Ingresá el saldo contado.</div>'; return; }
+  const {data,error}=await sb.rpc('cerrar_caja',{
+    p_sesion_id:sesion_id, p_saldo_declarado:Number(dec), p_notas:$('cj-cnotas').value.trim()||null});
+  if(error){ $('cj-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  const r=(data&&data[0])||null;
+  closeModal();
+  await PAGES.caja();
+  if(r){
+    const dif=Number(r.diferencia);
+    const cls = dif===0?'ok' : 'error';
+    const txt = dif===0 ? 'Turno cerrado sin diferencias.'
+              : dif>0  ? `Turno cerrado con un <b>sobrante de ${money(dif)}</b>.`
+                       : `Turno cerrado con un <b>faltante de ${money(Math.abs(dif))}</b>.`;
+    $('caj-msg').innerHTML=`<div class="msg ${cls}">
+      ${txt}<br>Sistema ${money(r.saldo_sistema)} · Declarado ${money(r.saldo_declarado)}</div>`;
+  }
+}
+
+async function cajMovimientos(caja_id, nombre){
+  const box=$('caj-detalle'); if(!box) return;
+  box.innerHTML='<div class="loading">Cargando movimientos…</div>';
+  const {data,error}=await sb.from('movimientos_caja')
+    .select('id,fecha,tipo,monto,medio,origen_tipo,origen_id,saldo_anterior,saldo_nuevo,notas,sesion_id')
+    .eq('caja_id',caja_id).order('fecha',{ascending:false}).limit(100);
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){
+    box.innerHTML=`<div class="panel"><div class="panel-head"><h3>${nombre}</h3></div>
+      <div class="empty">Todavía no hay movimientos en esta caja.</div></div>`; return; }
+  const origen=(t,id)=>{
+    if(!t) return '—';
+    const et={venta:'Venta',cobranza:'Cobranza',pago_proveedor:'Pago a proveedor',compra:'Compra',manual:'Manual'}[t]||t;
+    return et+(id?' #'+id:'');
+  };
+  const rows=data.map(m=>`<tr>
+    <td>${new Date(m.fecha).toLocaleString('es-AR')}</td>
+    <td>${m.tipo==='ingreso'?'<span class="tag ok">Ingreso</span>':'<span class="tag pend">Egreso</span>'}</td>
+    <td>${origen(m.origen_tipo,m.origen_id)}</td>
+    <td>${m.medio||'—'}</td>
+    <td>${m.sesion_id?'#'+m.sesion_id:'<span style="color:var(--muted)">sin turno</span>'}</td>
+    <td>${m.notas||''}</td>
+    <td class="cmp-num" style="font-weight:600;color:${m.tipo==='ingreso'?'var(--ok)':'var(--danger)'}">
+      ${m.tipo==='ingreso'?'+':'−'}${money(m.monto)}</td>
+    <td class="cmp-num">${money(m.saldo_nuevo)}</td>
+  </tr>`).join('');
+  box.innerHTML=tableShell(`Movimientos — ${nombre}`,
+    ['Fecha','Tipo','Origen','Medio','Turno','Notas','Monto','Saldo'],rows);
+}
+
+async function cajMovimientoManual(){
+  if(!esAdmin()){ alert('Sólo un administrador puede cargar movimientos manuales.'); return; }
+  await cobCargarCajas();
+  openModal('Movimiento manual de caja',`
+    <div class="row2">
+      <div class="field"><label>Caja *</label>
+        <select id="cm-caja">${COB_CAJAS.map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+      <div class="field"><label>Tipo *</label>
+        <select id="cm-tipo"><option value="ingreso">Ingreso</option><option value="egreso">Egreso</option></select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Monto *</label><input id="cm-monto" type="number" min="0" step="0.01"></div>
+      <div class="field"><label>Medio</label>
+        <select id="cm-medio">${COB_MEDIOS.map(m=>`<option value="${m.v}">${m.t}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Motivo *</label><input id="cm-notas" placeholder="Ej: retiro para combustible"></div>
+    <div id="cm-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="cajDoManual()">Registrar</button>`);
+}
+async function cajDoManual(){
+  const m=$('cm-msg');
+  const monto=Number($('cm-monto').value)||0;
+  if(monto<=0){ m.innerHTML='<div class="msg error">El monto debe ser mayor a cero.</div>'; return; }
+  const notas=$('cm-notas').value.trim();
+  if(!notas){ m.innerHTML='<div class="msg error">Cargá el motivo del movimiento.</div>'; return; }
+  const {error}=await sb.rpc('movimiento_caja_manual',{
+    p_caja_id:Number($('cm-caja').value), p_tipo:$('cm-tipo').value,
+    p_monto:monto, p_medio:$('cm-medio').value, p_notas:notas});
+  if(error){
+    let t=error.message||'Error';
+    if(/administrador/i.test(t)) t='Sólo un administrador puede cargar movimientos manuales.';
+    else if(/supera el saldo/i.test(t)) t='El egreso supera el saldo disponible en esa caja.';
+    m.innerHTML='<div class="msg error">'+t+'</div>'; return;
+  }
+  closeModal(); PAGES.caja();
+}
+
 PAGES.usuarios=async ()=>{
   loading();
   const {data}=await sb.from('perfiles').select('*').order('creado_en');
