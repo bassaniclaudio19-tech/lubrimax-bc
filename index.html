@@ -379,6 +379,18 @@ select:disabled{opacity:.5}
 .trb-alt{font-size:10px;color:var(--muted);border:1px solid var(--line);
   padding:1px 6px;border-radius:10px;margin-left:6px}
 .trb-sug.sin-prod{opacity:.62}
+
+.fil-tabla{width:100%;border-collapse:collapse;font-size:12px}
+.fil-tabla th{padding:8px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;
+  color:var(--muted);border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.fil-tabla td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+.fil-tabla tr:last-child td{border-bottom:none}
+.fil-cat{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--amber);white-space:nowrap}
+.fil-desc{color:var(--muted);font-size:11px;max-width:230px}
+.fil-sinprod{opacity:.62}
+.fil-otras{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
+.fil-toggle{background:none;color:var(--text);font-size:13px;font-weight:600;padding:4px 0}
+.fil-toggle:hover{color:var(--amber)}
 </style>
 </head>
 <body>
@@ -1938,45 +1950,64 @@ async function trbSaveItem(es_servicio){
 }
 
 // ---- filtros sugeridos del vehículo -> agregar al trabajo ----
-// El vehículo del cliente tiene una versión concreta: su aplicación va primero,
-// preseleccionada. Las demás versiones del modelo quedan abajo, sin marcar.
+// Estado comercial de un código: la aplicación existe siempre; el producto no.
+function estadoComercial(r){
+  switch(r.estado_comercial){
+    case 'no_cargado': return '<span class="tag pend">No cargado en catálogo Lubrimax</span>';
+    case 'sin_precio': return '<span class="tag warn">Sin precio cargado</span>';
+    case 'sin_stock' : return '<span class="tag warn">Sin stock</span>';
+    default          : return '<span class="tag ok">Stock '+Number(r.stock)+'</span>';
+  }
+}
+
+// El vehículo del cliente ya tiene versión: se resuelve su aplicación exacta
+// y se muestra como tabla. Las demás versiones quedan abajo, colapsadas.
 async function trbFiltrosVehiculo(vehiculo_id){
   const {data,error}=await sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:vehiculo_id});
-  if(error){ alert(error.message); return; }
+  if(error){ alert('No se pudieron traer los filtros: '+error.message); return; }
   if(!data||!data.length){
     openModal('Filtros para este vehículo',
-      '<div class="empty">Este vehículo no tiene filtros sugeridos. Vinculalo al catálogo desde su ficha.</div>',
+      '<div class="empty">Este vehículo no tiene filtros cargados en el catálogo.</div>',
       `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`); return; }
 
-  const {data:v}=await sb.from('vehiculos').select('marca,modelo,version,patente').eq('id',vehiculo_id).single();
+  const {data:v}=await sb.from('vehiculos')
+    .select('marca,modelo,version,patente').eq('id',vehiculo_id).single();
   const exactas = data.filter(r=>r.es_exacta);
   const otras   = data.filter(r=>!r.es_exacta);
 
   // Dentro de la aplicación exacta se preselecciona UNA opción por categoría.
-  // Las demás quedan visibles como alternativa, para que las elija el usuario.
+  // Las alternativas quedan visibles pero sin marcar.
   const yaMarcada={};
-  const fila=(r, preseleccionable)=>{
-    const sinProd = !r.producto_id;
+  const filaTabla=(r, preseleccionable, mostrarCat)=>{
+    const sinProd=!r.producto_id;
     let marcar=false, alt=false;
     if(preseleccionable && !sinProd){
       if(!yaMarcada[r.tipo]){ yaMarcada[r.tipo]=true; marcar=true; } else { alt=true; }
-    } else if(preseleccionable && sinProd){ alt=false; }
-    return `<label class="trb-sug${sinProd?' sin-prod':''}">
-      <input type="checkbox" value="${r.producto_id||''}" data-precio="${r.precio||0}"
-             data-cod="${r.codigo||''}" ${marcar?'checked':''}
-             ${sinProd?'disabled title="Sin producto cargado en Lubrimax"':''}>
-      <span><b style="color:var(--amber)">${r.codigo}</b>
-        ${alt?'<span class="trb-alt">alternativa</span>':''}
-        <div style="font-size:11px;color:var(--muted)">${r.descripcion||''}</div></span>
-      <span style="margin-left:auto;white-space:nowrap">${estadoComercial(r)}</span>
-    </label>`;
+    }
+    return `<tr class="${sinProd?'fil-sinprod':''}">
+      <td class="fil-cat">${mostrarCat?r.tipo:''}</td>
+      <td><b style="color:var(--amber)">${r.codigo}</b>
+        ${alt?'<span class="trb-alt">alternativa</span>':''}</td>
+      <td class="fil-desc">${sinProd?'<i style="color:var(--muted)">sin producto</i>':(r.descripcion||'')}</td>
+      <td class="cmp-num">${r.precio!=null?money(r.precio):'—'}</td>
+      <td>${estadoComercial(r)}</td>
+      <td style="text-align:center">
+        <input type="checkbox" class="fil-chk" value="${r.producto_id||''}"
+               data-precio="${r.precio||0}" data-cod="${r.codigo||''}"
+               ${marcar?'checked':''}
+               ${sinProd?'disabled title="No se puede agregar: no existe como producto"':''}>
+      </td></tr>`;
   };
 
-  const porCategoria=(filas, preseleccionable)=>{
-    const g={};
-    filas.forEach(r=>{ (g[r.tipo]=g[r.tipo]||[]).push(r); });
-    return Object.entries(g).map(([cat,arr])=>
-      `<div class="vehf-paso">${cat}</div>${arr.map(r=>fila(r,preseleccionable)).join('')}`).join('');
+  const tabla=(filas, preseleccionable)=>{
+    let cat=null;
+    return `<div class="tabla-wrap"><table class="fil-tabla">
+      <thead><tr><th>Categoría</th><th>Código</th><th>Producto Lubrimax</th>
+        <th class="cmp-num">Precio</th><th>Disponibilidad</th><th style="text-align:center">Agregar</th></tr></thead>
+      <tbody>${filas.map(r=>{
+        const nueva = r.tipo!==cat; cat=r.tipo;
+        return filaTabla(r, preseleccionable, nueva);
+      }).join('')}</tbody></table></div>`;
   };
 
   let html='';
@@ -1986,24 +2017,28 @@ async function trbFiltrosVehiculo(vehiculo_id){
         <div class="trb-veh-k">Vehículo del cliente</div>
         <div class="trb-veh-v">${[v?v.marca:'',v?v.modelo:'',v?v.version:''].filter(Boolean).join(' ')}
           ${v&&v.patente?`<span style="color:var(--muted);font-size:12px">· ${v.patente}</span>`:''}</div>
-        <div class="trb-veh-k" style="margin-top:8px">Aplicación encontrada</div>
+        <div class="trb-veh-k" style="margin-top:8px">Aplicación exacta del vehículo</div>
         <div class="trb-veh-v">${e.motor} · ${e.anio} <span class="tag ok">versión exacta</span></div>
       </div>`;
-    html += porCategoria(exactas, true);
+    html += tabla(exactas, true);
   } else {
-    html += `<div class="msg error" style="margin-bottom:12px">
-      No se identificó la versión exacta de este vehículo. Revisá su ficha y vinculalo al catálogo.
-    </div>`;
+    html += `<div class="msg error">No se pudo identificar la versión exacta de este vehículo.
+      Editalo desde su ficha y vinculalo al catálogo.</div>`;
   }
 
   if(otras.length){
     const porMotor={};
-    otras.forEach(r=>{ (porMotor[r.motor+' · '+r.anio]=porMotor[r.motor+' · '+r.anio]||[]).push(r); });
-    html += `<div class="trb-otras">Otras aplicaciones del mismo modelo</div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
-        No corresponden a la versión cargada. Empiezan sin marcar.</div>`;
-    html += Object.entries(porMotor).map(([m,arr])=>
-      `<div class="trb-motor">${m}</div>${porCategoria(arr,false)}`).join('');
+    otras.forEach(r=>{ const k=r.motor+' · '+r.anio; (porMotor[k]=porMotor[k]||[]).push(r); });
+    const n=Object.keys(porMotor).length;
+    html += `<div class="fil-otras">
+        <button class="fil-toggle" onclick="filToggleOtras()">
+          <span id="fil-flecha">▸</span> Ver otras versiones del mismo modelo (${n})</button>
+        <div id="fil-otras-body" style="display:none">
+          <div style="font-size:11px;color:var(--muted);margin:8px 0">
+            No corresponden a la versión cargada. Empiezan sin marcar.</div>
+          ${Object.entries(porMotor).map(([m,arr])=>
+            `<div class="trb-motor">${m}</div>${tabla(arr,false)}`).join('')}
+        </div></div>`;
   }
 
   openModal('Filtros para este vehículo', html,
@@ -2011,12 +2046,19 @@ async function trbFiltrosVehiculo(vehiculo_id){
      <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`);
 }
 
+function filToggleOtras(){
+  const b=$('fil-otras-body'), f=$('fil-flecha');
+  if(!b) return;
+  const abierto = b.style.display!=='none';
+  b.style.display = abierto?'none':'';
+  if(f) f.textContent = abierto?'▸':'▾';
+}
+
 async function trbAgregarSugeridos(){
   // Sólo lo tildado. Nada se agrega automáticamente al abrir el modal.
-  const marcados=[...document.querySelectorAll('.trb-sug input:checked:not(:disabled)')];
+  const marcados=[...document.querySelectorAll('.fil-chk:checked:not(:disabled)')];
   if(!marcados.length){ closeModal(); return; }
-  const vistos={};
-  const filas=[];
+  const vistos={}; const filas=[];
   marcados.forEach(c=>{
     const id=Number(c.value); if(!id || vistos[id]) return;   // sin duplicados
     vistos[id]=true;
