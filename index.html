@@ -332,6 +332,24 @@ select:disabled{opacity:.5}
   .veh-item{flex-wrap:wrap;gap:8px}
   .veh-pat{min-width:auto}
 }
+
+.vehf-paso{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--amber);
+  margin:4px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--line)}
+.vehf-paso:not(:first-child){margin-top:20px}
+
+.cat-tabla td{font-size:12px;line-height:1.6}
+.cat-tabla th{position:sticky;top:0;background:var(--panel);z-index:2}
+.cat-motor{color:var(--text);min-width:190px}
+.cat-anio{color:var(--muted);white-space:nowrap}
+.cat-vacio{color:var(--line)}
+.tabla-wrap{overflow-x:auto;max-width:100%}
+.cat-tabla .filtro-cod{font-size:12px;font-weight:600}
+
+.trb-sug{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;
+  border-bottom:1px solid var(--line);font-size:13px;cursor:pointer}
+.trb-sug:last-child{border-bottom:none}
+.trb-sug:hover{background:var(--panel-2)}
+.trb-sug input{margin-top:3px;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -728,114 +746,152 @@ async function saveCliente(id){
   if(id) cliFicha(id); else PAGES.clientes();
 }
 
-// ---------- ALTA / EDICIÓN DE VEHÍCULO ----------
-let VF_CAT=null; // {id, txt} elegido del catálogo
-function formVehiculoCliente(cliente_id, v){
-  v=v||{};
-  VF_CAT = v.vehiculo_catalogo_id ? {id:v.vehiculo_catalogo_id, txt:v.catalogo_txt||''} : null;
-  openModal(v.id?'Editar vehículo':'Nuevo vehículo',`
-    <div class="row2">
-      <div class="field"><label>Patente</label>
-        <input id="v-pat" value="${v.patente||''}" placeholder="AB123CD" style="text-transform:uppercase"></div>
-      <div class="field"><label>Año</label><input id="v-anio" type="number" value="${v.anio||''}" placeholder="2021"></div>
-    </div>
-    <div class="field"><label>Vincular al catálogo (para sugerir filtros)</label>
-      <input id="v-cat" readonly onclick="vfElegirCatalogo()" style="cursor:pointer;background:var(--panel-2)"
-             value="${(VF_CAT?VF_CAT.txt:'').replace(/"/g,'&quot;')}" placeholder="Elegir del catálogo…">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">Opcional, pero permite sugerir los filtros del vehículo.</div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Marca</label><input id="v-marca" value="${(v.marca||'').replace(/"/g,'&quot;')}"></div>
-      <div class="field"><label>Modelo</label><input id="v-modelo" value="${(v.modelo||'').replace(/"/g,'&quot;')}"></div>
-    </div>
-    <div class="row2">
-      <div class="field"><label>Motor / versión</label><input id="v-version" value="${(v.version||'').replace(/"/g,'&quot;')}" placeholder="1.4 TSI"></div>
-      <div class="field"><label>Kilometraje</label><input id="v-km" type="number" value="${v.km_actual||''}"></div>
-    </div>
-    <div class="field"><label>Observaciones</label><input id="v-obs" value="${(v.observaciones||'').replace(/"/g,'&quot;')}"></div>
-    <div id="v-msg"></div>
-  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-     <button class="btn" onclick="saveVehiculo(${cliente_id},${v.id||'null'})">Guardar</button>`);
-}
+// ---------- ALTA / EDICIÓN DE VEHÍCULO DEL CLIENTE ----------
+// Flujo: Tipo → Marca → Modelo → Versión (una sola) → Año → Patente → Km → Obs.
+// El vehículo del cliente guarda SOLO su identidad. Los filtros se resuelven
+// después, desde la ficha del vehículo o el Buscador.
+let VEHF = null;   // estado del formulario
 
-// Selector de catálogo reutilizando la cascada Tipo → Marca → Modelo
-async function vfElegirCatalogo(){
-  const {data:tipos}=await sb.rpc('cat_tipos');
-  openModal('Elegir del catálogo',`
-    <div class="field"><label>Tipo de vehículo</label>
-      <select id="vf-tipo" onchange="vfMarcas(this.value)">
-        <option value="">Seleccionar tipo…</option>
-        ${(tipos||[]).map(t=>`<option value="${t.tipo}">${t.tipo}</option>`).join('')}
-      </select></div>
-    <div class="field"><label>Marca</label><select id="vf-marca" onchange="vfModelos(this.value)" disabled>
-      <option value="">Seleccionar marca</option></select></div>
-    <div class="field"><label>Modelo</label><select id="vf-modelo" onchange="vfVersiones(this.value)" disabled>
-      <option value="">Seleccionar modelo</option></select></div>
-    <div class="field"><label>Motor / versión</label><select id="vf-version" disabled>
-      <option value="">Todas las versiones</option></select></div>
-    <div style="font-size:11px;color:var(--muted)">Si no sabés la versión exacta, dejá "todas": el sistema igual sugiere los filtros del modelo.</div>
-  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-     <button class="btn" onclick="vfConfirmar()">Usar este vehículo</button>`);
-}
-async function vfMarcas(tipo){
-  const s=$('vf-marca'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_marcas',{p_tipo:tipo||null});
-  s.innerHTML='<option value="">Seleccionar marca</option>'+
-    (data||[]).map(m=>`<option value="${m.marca.replace(/"/g,'&quot;')}">${m.marca}</option>`).join('');
-  s.disabled=false;
-  $('vf-modelo').innerHTML='<option value="">Seleccionar modelo</option>'; $('vf-modelo').disabled=true;
-  $('vf-version').innerHTML='<option value="">Todas las versiones</option>'; $('vf-version').disabled=true;
-}
-async function vfModelos(marca){
-  const s=$('vf-modelo'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_modelos',{p_marca:marca,p_tipo:$('vf-tipo').value||null});
-  s.innerHTML='<option value="">Seleccionar modelo</option>'+
-    (data||[]).map(m=>`<option value="${m.modelo.replace(/"/g,'&quot;')}">${m.modelo} (${m.filtros})</option>`).join('');
-  s.disabled=false;
-}
-async function vfVersiones(modelo){
-  const s=$('vf-version'); s.disabled=true; s.innerHTML='<option>Cargando…</option>';
-  const {data}=await sb.rpc('cat_versiones',{p_marca:$('vf-marca').value,p_modelo:modelo,p_tipo:$('vf-tipo').value||null});
-  s.innerHTML='<option value="">Todas las versiones</option>'+
-    (data||[]).map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor}</option>`).join('');
-  s.disabled=false;
-}
-async function vfConfirmar(){
-  const marca=$('vf-marca').value, modelo=$('vf-modelo').value, ver=$('vf-version').value;
-  if(!marca||!modelo){ alert('Elegí al menos marca y modelo.'); return; }
-  // resolver la fila del catálogo (si hay versión, la exacta; si no, la primera del modelo)
-  let q=sb.from('vehiculos_catalogo').select('id,marca,modelo,version').ilike('marca',marca).ilike('modelo',modelo);
-  const {data}=await q.limit(50);
-  let row=(data||[])[0]||null;
-  if(ver && data){ const m=data.find(x=>(x.version||'').toLowerCase().includes(ver.toLowerCase())); if(m) row=m; }
-  closeModal();
-  VF_CAT = row ? {id:row.id, txt:[marca,modelo,ver].filter(Boolean).join(' ')} : null;
-  // reabrir el form del vehículo con los datos precargados
-  const cli = CLI_ACTUAL ? CLI_ACTUAL.id : null;
-  formVehiculoCliente(cli, {vehiculo_catalogo_id:VF_CAT?VF_CAT.id:null, catalogo_txt:VF_CAT?VF_CAT.txt:'',
-    marca, modelo, version:ver||''});
-}
-
-async function saveVehiculo(cliente_id, id){
-  const pat=$('v-pat').value.trim().toUpperCase().replace(/\s+/g,'');
-  const payload={
-    cliente_id, patente:pat||null,
-    marca:$('v-marca').value.trim()||null, modelo:$('v-modelo').value.trim()||null,
-    version:$('v-version').value.trim()||null,
-    anio:Number($('v-anio').value)||null, km_actual:Number($('v-km').value)||null,
-    observaciones:$('v-obs').value.trim()||null,
-    vehiculo_catalogo_id: VF_CAT?VF_CAT.id:null
+async function formVehiculoCliente(cliente_id, v){
+  v = v || {};
+  VEHF = {
+    cliente_id, id: v.id || null,
+    tipo: v.tipo_vehiculo || null,
+    marca: v.marca || null,
+    modelo: v.modelo || null,
+    version: v.version || null,
+    catalogo_id: v.vehiculo_catalogo_id || null
   };
-  if(!payload.marca && !payload.patente){
-    $('v-msg').innerHTML='<div class="msg error">Cargá al menos la patente o la marca.</div>'; return; }
-  const q=id? sb.from('vehiculos').update(payload).eq('id',id) : sb.from('vehiculos').insert(payload);
+  openModal(v.id ? 'Editar vehículo' : 'Nuevo vehículo', `
+    <div class="vehf-paso">Identificación del vehículo</div>
+    <div class="field"><label>1. Tipo de vehículo</label>
+      <select id="vf-tipo" onchange="vfTipo(this.value)"><option value="">Cargando…</option></select></div>
+    <div class="field"><label>2. Marca</label>
+      <select id="vf-marca" onchange="vfMarca(this.value)" disabled><option value="">Seleccionar marca</option></select></div>
+    <div class="field"><label>3. Modelo</label>
+      <select id="vf-modelo" onchange="vfModelo(this.value)" disabled><option value="">Seleccionar modelo</option></select></div>
+    <div class="field"><label>4. Versión / motor</label>
+      <select id="vf-version" onchange="vfVersion(this.value)" disabled><option value="">Seleccionar versión</option></select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">Elegí una sola versión concreta.</div></div>
+
+    <div class="vehf-paso">Datos del vehículo</div>
+    <div class="row2">
+      <div class="field"><label>5. Año</label>
+        <input id="v-anio" type="number" value="${v.anio||''}" placeholder="2025" min="1950" max="2100"></div>
+      <div class="field"><label>6. Patente</label>
+        <input id="v-pat" value="${v.patente||''}" placeholder="AB123CD" style="text-transform:uppercase"></div>
+    </div>
+    <div class="field"><label>7. Kilometraje</label>
+      <input id="v-km" type="number" value="${v.km_actual||''}" placeholder="82350"></div>
+    <div class="field"><label>8. Observaciones</label>
+      <input id="v-obs" value="${(v.observaciones||'').replace(/"/g,'&quot;')}"></div>
+    <div id="v-msg"></div>
+  `, `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn" onclick="saveVehiculo()">Guardar</button>`);
+
+  // cargar tipos y, si es edición, reconstruir la cascada
+  const {data:tipos}=await sb.rpc('cat_tipos');
+  const st=$('vf-tipo');
+  st.innerHTML='<option value="">Seleccionar tipo…</option>'+
+    (tipos||[]).map(t=>`<option value="${t.tipo}" ${VEHF.tipo===t.tipo?'selected':''}>${t.tipo}</option>`).join('');
+  if(VEHF.tipo){ await vfCargarMarcas(true); }
+}
+
+async function vfTipo(val){
+  VEHF.tipo = val || null;
+  VEHF.marca=null; VEHF.modelo=null; VEHF.version=null; VEHF.catalogo_id=null;
+  vfLimpiar(['vf-marca','vf-modelo','vf-version']);
+  if(VEHF.tipo) await vfCargarMarcas(false);
+}
+async function vfCargarMarcas(mantener){
+  const s=$('vf-marca'); if(!s) return;
+  s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_marcas',{p_tipo:VEHF.tipo});
+  s.innerHTML='<option value="">Seleccionar marca</option>'+
+    (data||[]).map(m=>`<option value="${m.marca.replace(/"/g,'&quot;')}" ${mantener&&VEHF.marca===m.marca?'selected':''}>${m.marca}</option>`).join('');
+  s.disabled=false;
+  if(mantener && VEHF.marca) await vfCargarModelos(true);
+}
+
+async function vfMarca(val){
+  VEHF.marca = val || null;
+  VEHF.modelo=null; VEHF.version=null; VEHF.catalogo_id=null;
+  vfLimpiar(['vf-modelo','vf-version']);
+  if(VEHF.marca) await vfCargarModelos(false);
+}
+async function vfCargarModelos(mantener){
+  const s=$('vf-modelo'); if(!s) return;
+  s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_modelos',{p_marca:VEHF.marca,p_tipo:VEHF.tipo});
+  // sin contadores: en el alta del vehículo no se muestra nada del catálogo de filtros
+  s.innerHTML='<option value="">Seleccionar modelo</option>'+
+    (data||[]).map(m=>`<option value="${m.modelo.replace(/"/g,'&quot;')}" ${mantener&&VEHF.modelo===m.modelo?'selected':''}>${m.modelo}</option>`).join('');
+  s.disabled=false;
+  if(mantener && VEHF.modelo) await vfCargarVersiones(true);
+}
+
+async function vfModelo(val){
+  VEHF.modelo = val || null;
+  VEHF.version=null; VEHF.catalogo_id=null;
+  vfLimpiar(['vf-version']);
+  if(VEHF.modelo) await vfCargarVersiones(false);
+}
+async function vfCargarVersiones(mantener){
+  const s=$('vf-version'); if(!s) return;
+  s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
+  const {data}=await sb.rpc('cat_versiones_vehiculo',
+    {p_marca:VEHF.marca,p_modelo:VEHF.modelo,p_tipo:VEHF.tipo});
+  const opts=(data||[]);
+  s.innerHTML='<option value="">Seleccionar versión</option>'+
+    opts.map(o=>`<option value="${(o.version||'').replace(/"/g,'&quot;')}" data-cat="${o.catalogo_id}" ${mantener&&VEHF.version===o.version?'selected':''}>${o.version}</option>`).join('');
+  s.disabled=false;
+  // si la versión guardada ya no está en la lista, se limpia
+  if(mantener && VEHF.version){
+    const m=opts.find(o=>o.version===VEHF.version);
+    VEHF.catalogo_id = m ? m.catalogo_id : VEHF.catalogo_id;
+  }
+}
+function vfVersion(val){
+  VEHF.version = val || null;
+  const s=$('vf-version');
+  const op = s && s.selectedOptions[0];
+  VEHF.catalogo_id = (op && op.dataset.cat) ? Number(op.dataset.cat) : null;
+}
+function vfLimpiar(ids){
+  const labels={'vf-marca':'Seleccionar marca','vf-modelo':'Seleccionar modelo','vf-version':'Seleccionar versión'};
+  ids.forEach(id=>{ const s=$(id); if(s){ s.innerHTML='<option value="">'+(labels[id]||'')+'</option>'; s.disabled=true; } });
+}
+
+async function saveVehiculo(){
+  const msg=$('v-msg');
+  const pat=$('v-pat').value.trim().toUpperCase().replace(/\s+/g,'');
+  const anio=Number($('v-anio').value)||null;
+  if(!VEHF.marca && !pat){
+    msg.innerHTML='<div class="msg error">Elegí al menos la marca o cargá la patente.</div>'; return; }
+  if(anio && (anio<1950 || anio>2100)){
+    msg.innerHTML='<div class="msg error">El año no parece válido.</div>'; return; }
+
+  const payload={
+    cliente_id: VEHF.cliente_id,
+    patente: pat||null,
+    marca: VEHF.marca, modelo: VEHF.modelo,
+    version: VEHF.version && VEHF.version!=='(sin especificar)' ? VEHF.version : null,
+    anio,
+    km_actual: Number($('v-km').value)||null,
+    observaciones: $('v-obs').value.trim()||null,
+    vehiculo_catalogo_id: VEHF.catalogo_id || null
+  };
+  const q = VEHF.id
+    ? sb.from('vehiculos').update(payload).eq('id',VEHF.id)
+    : sb.from('vehiculos').insert(payload);
   const {error}=await q;
   if(error){
     const m=/duplicate key|ux_vehiculos_patente/i.test(error.message)
-      ? 'Ya existe un vehículo con esa patente.' : error.message;
-    $('v-msg').innerHTML='<div class="msg error">'+m+'</div>'; return;
+      ? 'Ya existe un vehículo registrado con esa patente.' : error.message;
+    msg.innerHTML='<div class="msg error">'+m+'</div>'; return;
   }
-  closeModal(); cliFicha(cliente_id);
+  closeModal();
+  cliFicha(VEHF.cliente_id);
 }
 
 // ---------- FICHA DEL VEHÍCULO ----------
@@ -862,7 +918,10 @@ async function vehFicha(id){
         <b>${v.patente||'sin patente'}</b>${v.anio?' · '+v.anio:''}
         · ${v.km_actual?Number(v.km_actual).toLocaleString('es-AR')+' km':'km no registrado'}
       </div>
-      <button class="btn btn-sm" onclick="vehActualizarKm(${v.id},${v.km_actual||0})">Actualizar km</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" onclick="trbNuevo(${v.id})">+ Nuevo trabajo</button>
+        <button class="btn btn-ghost btn-sm" onclick="vehActualizarKm(${v.id},${v.km_actual||0})">Actualizar km</button>
+      </div>
     </div>
 
     <div class="panel" style="margin-bottom:16px">
@@ -908,7 +967,9 @@ async function vehFicha(id){
       <tbody>${hist.map(h=>`<tr>
         <td>${h.fecha||'—'}</td>
         <td>${h.km?Number(h.km).toLocaleString('es-AR'):'—'}</td>
-        <td><span class="tag ${h.origen==='trabajo'?'warn':'ok'}">${h.origen}</span> ${h.detalle||''}</td>
+        <td><span class="tag ${h.origen==='trabajo'?'warn':'ok'}">${h.origen}</span> ${h.detalle||''}
+          ${h.servicios?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${h.servicios}</div>`:''}
+          ${h.productos?`<div style="font-size:11px;color:var(--amber);margin-top:2px">${h.productos}</div>`:''}</td>
         <td>${h.estado||'—'}</td>
         <td style="text-align:right">${h.importe!=null?money(h.importe):'—'}</td>
       </tr>`).join('')}</tbody></table>`;
@@ -1489,11 +1550,398 @@ PAGES.ventas=async ()=>{
   await simpleList('ventas','Ventas',['Fecha','Forma pago','Estado','Total'],
     v=>`<tr><td>${v.fecha}</td><td>${v.forma_pago}</td><td><span class="tag ${v.estado_pago==='pagado'?'ok':'pend'}">${v.estado_pago}</span></td><td>${money(v.total)}</td></tr>`);
 };
+// ----- TRABAJOS (orden de trabajo) -----
+const TRB_ESTADOS=[
+  {v:'pendiente',          t:'Pendiente',           c:'warn'},
+  {v:'en_proceso',         t:'En proceso',          c:'warn'},
+  {v:'esperando_repuesto', t:'Esperando repuesto',  c:'pend'},
+  {v:'terminado',          t:'Terminado',           c:'ok'},
+  {v:'entregado',          t:'Entregado',           c:'ok'},
+  {v:'cancelado',          t:'Cancelado',           c:'pend'}
+];
+const trbEst=(v)=>{const e=TRB_ESTADOS.find(x=>x.v===v)||{t:v||'—',c:'warn'};
+  return `<span class="tag ${e.c}">${e.t}</span>`;};
+let TRB_FILTRO='', TRB_ACTUAL=null;
+
 PAGES.trabajos=async ()=>{
-  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nuevo trabajo (próximo)</button>`;
-  await simpleList('trabajos','Trabajos realizados',['Fecha','Descripción','Estado',''],
-    t=>`<tr><td>${t.fecha}</td><td>${t.descripcion}</td><td><span class="tag ok">${t.estado}</span></td><td></td></tr>`);
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="trbNuevo()">+ Nuevo trabajo</button>`;
+  content.innerHTML=`
+    <div class="cli-toolbar">
+      <select id="trb-f" class="cli-search" style="max-width:260px" onchange="trbRender(this.value)">
+        <option value="">Todos los estados</option>
+        <option value="abiertos">Solo abiertos</option>
+        ${TRB_ESTADOS.map(e=>`<option value="${e.v}">${e.t}</option>`).join('')}
+      </select>
+    </div>
+    <div id="trb-list"><div class="loading">Cargando…</div></div>`;
+  $('trb-f').value=TRB_FILTRO;
+  await trbRender(TRB_FILTRO);
 };
+
+async function trbRender(f){
+  TRB_FILTRO=f||'';
+  const box=$('trb-list'); if(!box) return;
+  let q=sb.from('trabajos')
+    .select('id,fecha,km,descripcion,estado,cliente_id,vehiculo_id,venta_id')
+    .order('creado_en',{ascending:false});
+  if(TRB_FILTRO==='abiertos') q=q.in('estado',['pendiente','en_proceso','esperando_repuesto']);
+  else if(TRB_FILTRO) q=q.eq('estado',TRB_FILTRO);
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){
+    box.innerHTML='<div class="panel"><div class="empty">No hay trabajos'+(TRB_FILTRO?' con ese estado':' cargados')+'.</div></div>'; return; }
+  // datos de cliente y vehículo
+  const cid=[...new Set(data.map(t=>t.cliente_id).filter(Boolean))];
+  const vid=[...new Set(data.map(t=>t.vehiculo_id).filter(Boolean))];
+  let cli={}, veh={};
+  if(cid.length){ const {data:c}=await sb.from('clientes').select('id,nombre').in('id',cid); (c||[]).forEach(x=>cli[x.id]=x.nombre); }
+  if(vid.length){ const {data:v}=await sb.from('vehiculos').select('id,patente,marca,modelo').in('id',vid); (v||[]).forEach(x=>veh[x.id]=x); }
+  const rows=data.map(t=>{
+    const v=veh[t.vehiculo_id];
+    return `<tr style="cursor:pointer" onclick="trbFicha(${t.id})">
+      <td>${t.fecha}</td>
+      <td>${cli[t.cliente_id]||'—'}</td>
+      <td>${v?`<b style="color:var(--amber)">${v.patente||''}</b> ${[v.marca,v.modelo].filter(Boolean).join(' ')}`:'—'}</td>
+      <td>${t.descripcion||'—'}</td>
+      <td>${t.km?Number(t.km).toLocaleString('es-AR')+' km':'—'}</td>
+      <td>${trbEst(t.estado)}</td>
+      <td>${t.venta_id?'<span class="tag ok">Venta #'+t.venta_id+'</span>':'<span style="color:var(--muted)">sin facturar</span>'}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=tableShell(`Órdenes de trabajo (${data.length})`,
+    ['Fecha','Cliente','Vehículo','Descripción','Km','Estado','Facturación'],rows);
+}
+
+// ---------- ALTA ----------
+async function trbNuevo(vehiculo_id){
+  const {data:cls}=await sb.from('clientes').select('id,nombre').eq('activo',true).order('nombre');
+  let vehs=[];
+  if(vehiculo_id){ const {data}=await sb.from('vehiculos').select('*').eq('id',vehiculo_id); vehs=data||[]; }
+  openModal('Nuevo trabajo',`
+    <div class="field"><label>Cliente</label>
+      <select id="t-cli" onchange="trbCargarVehiculos(this.value)">
+        <option value="">— sin cliente —</option>
+        ${(cls||[]).map(c=>`<option value="${c.id}">${c.nombre}</option>`).join('')}</select></div>
+    <div class="field"><label>Vehículo</label>
+      <select id="t-veh" onchange="trbKmSugerido(this.value)" ${vehiculo_id?'':'disabled'}>
+        <option value="">Elegí primero el cliente</option>
+        ${vehs.map(v=>`<option value="${v.id}" selected>${v.patente||''} ${v.marca||''} ${v.modelo||''}</option>`).join('')}
+      </select></div>
+    <div class="row2">
+      <div class="field"><label>Fecha</label><input id="t-fecha" type="date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="field"><label>Kilometraje</label><input id="t-km" type="number" placeholder="82350"></div>
+    </div>
+    <div class="field"><label>Motivo / descripción *</label><input id="t-desc" placeholder="Service completo"></div>
+    <div class="field"><label>Diagnóstico</label><input id="t-diag" placeholder="Qué se detectó"></div>
+    <div class="field"><label>Observaciones</label><input id="t-obs"></div>
+    <div id="t-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="trbGuardar()">Crear trabajo</button>`);
+  window._trbVehs={};
+  if(vehiculo_id && vehs[0]){ window._trbVehs[vehs[0].id]=vehs[0];
+    const {data:v}=await sb.from('vehiculos').select('cliente_id').eq('id',vehiculo_id).single();
+    if(v) $('t-cli').value=v.cliente_id; }
+}
+async function trbCargarVehiculos(cliente_id){
+  const s=$('t-veh'); if(!s) return;
+  if(!cliente_id){ s.innerHTML='<option value="">Elegí primero el cliente</option>'; s.disabled=true; return; }
+  s.disabled=true; s.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cliente_vehiculos',{p_cliente_id:Number(cliente_id)});
+  window._trbVehs={}; (data||[]).forEach(v=>window._trbVehs[v.id]=v);
+  s.innerHTML='<option value="">— sin vehículo —</option>'+
+    (data||[]).map(v=>`<option value="${v.id}">${v.patente||'sin patente'} · ${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')}</option>`).join('');
+  s.disabled=false;
+}
+function trbKmSugerido(vid){
+  const v=(window._trbVehs||{})[vid];
+  if(v && v.km_actual && !$('t-km').value) $('t-km').value=v.km_actual;
+}
+async function trbGuardar(){
+  const desc=$('t-desc').value.trim();
+  if(!desc){ $('t-msg').innerHTML='<div class="msg error">Cargá el motivo del trabajo.</div>'; return; }
+  const payload={
+    cliente_id:Number($('t-cli').value)||null,
+    vehiculo_id:Number($('t-veh').value)||null,
+    fecha:$('t-fecha').value||new Date().toISOString().slice(0,10),
+    km:Number($('t-km').value)||null,
+    descripcion:desc,
+    diagnostico:$('t-diag').value.trim()||null,
+    observaciones:$('t-obs').value.trim()||null,
+    estado:'pendiente', creado_por:currentUser.id
+  };
+  const {data,error}=await sb.from('trabajos').insert(payload).select('id').single();
+  if(error){ $('t-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  // si hay vehículo y km nuevo, actualizamos el odómetro
+  if(payload.vehiculo_id && payload.km){
+    const v=(window._trbVehs||{})[payload.vehiculo_id];
+    if(!v || !v.km_actual || payload.km > v.km_actual)
+      await sb.from('vehiculos').update({km_actual:payload.km}).eq('id',payload.vehiculo_id);
+  }
+  closeModal(); trbFicha(data.id);
+}
+
+// ---------- FICHA / ORDEN ----------
+async function trbFicha(id){
+  loading();
+  const {data:t}=await sb.from('trabajos').select('*').eq('id',id).single();
+  if(!t){ content.innerHTML='<div class="msg error">Trabajo no encontrado.</div>'; return; }
+  TRB_ACTUAL=t;
+  const [{data:items},cli,veh]=await Promise.all([
+    sb.rpc('trabajo_detalle',{p_trabajo_id:id}),
+    t.cliente_id? sb.from('clientes').select('nombre').eq('id',t.cliente_id).single():Promise.resolve({data:null}),
+    t.vehiculo_id? sb.from('vehiculos').select('*').eq('id',t.vehiculo_id).single():Promise.resolve({data:null})
+  ]);
+  const v=veh.data, total=(items||[]).reduce((s,i)=>s+Number(i.subtotal||0),0);
+  const cerrado = !!t.venta_id || t.estado==='cancelado';
+
+  pageTitle.textContent='Trabajo #'+t.id;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('trabajos')">← Trabajos</button>`;
+  content.innerHTML=`
+    <div id="trb-msg"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>${t.descripcion||'Trabajo'}</h3>
+        <select id="trb-estado" onchange="trbCambiarEstado(${t.id},this.value)" ${cerrado?'disabled':''} style="width:190px">
+          ${TRB_ESTADOS.map(e=>`<option value="${e.v}" ${t.estado===e.v?'selected':''}>${e.t}</option>`).join('')}
+        </select></div>
+      <div class="ficha-grid">
+        <div><span class="k">Cliente</span><span>${cli.data?cli.data.nombre:'—'}</span></div>
+        <div><span class="k">Vehículo</span><span>${v?`<b style="color:var(--amber)">${v.patente||''}</b> ${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')}`:'—'}</span></div>
+        <div><span class="k">Fecha</span><span>${t.fecha}</span></div>
+        <div><span class="k">Kilometraje</span><span>${t.km?Number(t.km).toLocaleString('es-AR')+' km':'—'}</span></div>
+        <div><span class="k">Facturación</span><span>${t.venta_id?'<span class="tag ok">Venta #'+t.venta_id+'</span>':'Sin facturar'}</span></div>
+        <div><span class="k">Estado</span><span>${trbEst(t.estado)}</span></div>
+        ${t.diagnostico?`<div style="grid-column:1/-1"><span class="k">Diagnóstico</span><span>${t.diagnostico}</span></div>`:''}
+        ${t.observaciones?`<div style="grid-column:1/-1"><span class="k">Observaciones</span><span>${t.observaciones}</span></div>`:''}
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Servicios y productos</h3>
+        ${cerrado?'':`<div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="trbAddServicio()">+ Servicio</button>
+          <button class="btn btn-ghost btn-sm" onclick="trbAddProducto()">+ Producto</button>
+          ${v?`<button class="btn btn-sm" onclick="trbFiltrosVehiculo(${v.id})">Ver filtros de este vehículo</button>`:''}
+        </div>`}</div>
+      <div id="trb-items"></div>
+      <div class="cmp-totals">
+        <div class="tt total"><div class="k">Total</div><div class="v">${money(total)}</div></div>
+      </div>
+      ${cerrado||!(items||[]).length?'':`<div style="padding:16px 20px;border-top:1px solid var(--line);display:flex;justify-content:flex-end">
+        <button class="btn" onclick="trbFacturar(${t.id})">Facturar trabajo</button></div>`}
+    </div>`;
+  trbPintarItems(items||[], cerrado);
+}
+
+function trbPintarItems(items, cerrado){
+  const box=$('trb-items'); if(!box) return;
+  if(!items.length){ box.innerHTML='<div class="empty" style="padding:24px">Todavía no cargaste servicios ni productos.</div>'; return; }
+  box.innerHTML=`<table class="cmp-lines"><thead><tr>
+      <th>Detalle</th><th style="width:12%">Tipo</th><th style="width:10%" class="cmp-num">Cant.</th>
+      <th style="width:15%" class="cmp-num">Precio</th><th style="width:15%" class="cmp-num">Subtotal</th><th style="width:5%"></th>
+    </tr></thead><tbody>
+    ${items.map(i=>`<tr>
+      <td>${i.codigo?`<b style="color:var(--amber)">${i.codigo}</b> · `:''}${i.descripcion||''}
+        ${!i.es_servicio && Number(i.stock)<=0?' <span class="tag pend">sin stock</span>':''}</td>
+      <td>${i.es_servicio?'<span class="tag warn">Servicio</span>':'<span class="tag ok">Producto</span>'}</td>
+      <td class="cmp-num">${Number(i.cantidad)}</td>
+      <td class="cmp-num">${money(i.precio_unitario)}</td>
+      <td class="cmp-num" style="font-weight:600">${money(i.subtotal)}</td>
+      <td>${cerrado?'':`<button class="cmp-delrow" onclick="trbDelItem(${i.item_id})">×</button>`}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function trbCambiarEstado(id,estado){
+  const {error}=await sb.from('trabajos').update({estado}).eq('id',id);
+  const m=$('trb-msg');
+  if(error){ m.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  m.innerHTML='<div class="msg ok">Estado actualizado.</div>';
+  setTimeout(()=>{ m.innerHTML=''; },1500);
+}
+async function trbDelItem(item_id){
+  await sb.from('trabajo_items').delete().eq('id',item_id);
+  trbFicha(TRB_ACTUAL.id);
+}
+
+// ---- agregar servicio (del catálogo) ----
+async function trbAddServicio(){
+  const {data}=await sb.from('productos').select('id,codigo,nombre,categoria,precio_venta')
+    .eq('tipo','servicio').eq('activo',true).order('categoria').order('nombre');
+  const grupos={};
+  (data||[]).forEach(s=>{ (grupos[s.categoria||'Otros']=grupos[s.categoria||'Otros']||[]).push(s); });
+  openModal('Agregar servicio',`
+    <div class="field"><label>Servicio</label>
+      <select id="ts-id" onchange="trbPrecioSugerido('ts')">
+        ${Object.entries(grupos).map(([g,arr])=>`<optgroup label="${g}">
+          ${arr.map(s=>`<option value="${s.id}" data-precio="${s.precio_venta||0}">${s.nombre}</option>`).join('')}
+        </optgroup>`).join('')}
+      </select></div>
+    <div class="row2">
+      <div class="field"><label>Cantidad</label><input id="ts-cant" type="number" value="1" min="1"></div>
+      <div class="field"><label>Precio</label><input id="ts-precio" type="number" value="0" min="0"></div>
+    </div>
+    <div style="font-size:11px;color:var(--muted)">Los servicios todavía no tienen precio de lista: cargalo acá o definilo en Productos.</div>
+    <div id="ts-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="trbSaveItem(true)">Agregar</button>`);
+  trbPrecioSugerido('ts');
+}
+function trbPrecioSugerido(pref){
+  const s=$(pref+'-id'); if(!s||!s.selectedOptions[0]) return;
+  const p=Number(s.selectedOptions[0].dataset.precio)||0;
+  const inp=$(pref+'-precio'); if(inp && (!inp.value||Number(inp.value)===0)) inp.value=p;
+}
+
+// ---- agregar producto (buscador) ----
+function trbAddProducto(){
+  openModal('Agregar producto',`
+    <div class="field"><label>Buscar producto</label>
+      <div class="cmp-prodwrap">
+        <input id="tp-q" placeholder="Código o nombre…" autocomplete="off" oninput="trbBuscarProd(this.value)">
+        <div class="cmp-prodhits" id="tp-hits"></div>
+      </div></div>
+    <div id="tp-sel" style="font-size:13px;color:var(--muted);margin-bottom:10px">Ningún producto elegido</div>
+    <div class="row2">
+      <div class="field"><label>Cantidad</label><input id="tp-cant" type="number" value="1" min="1"></div>
+      <div class="field"><label>Precio</label><input id="tp-precio" type="number" value="0" min="0"></div>
+    </div>
+    <div id="tp-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="trbSaveItem(false)">Agregar</button>`);
+  window._trbProd=null;
+}
+let TRB_T=null;
+function trbBuscarProd(q){
+  const box=$('tp-hits'); if(!box) return;
+  if(!q||q.trim().length<2){ box.classList.remove('show'); return; }
+  clearTimeout(TRB_T);
+  TRB_T=setTimeout(async ()=>{
+    const t=q.trim();
+    const {data}=await sb.from('productos').select('id,codigo,nombre,stock,precio_venta')
+      .eq('tipo','producto').or(`nombre.ilike.%${t}%,codigo.ilike.%${t}%`).limit(10);
+    if(!data||!data.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
+    box.innerHTML=data.map(p=>`<div class="cmp-prodhit" onclick='trbElegirProd(${JSON.stringify(p).replace(/'/g,"&#39;")})'>
+      <b>${p.codigo||'—'}</b> · ${p.nombre||''} <span style="color:var(--muted)">(stock ${Number(p.stock)||0} · ${money(p.precio_venta)})</span></div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+function trbElegirProd(p){
+  window._trbProd=p;
+  $('tp-sel').innerHTML=`<b style="color:var(--amber)">${p.codigo||''}</b> ${p.nombre||''} · stock ${Number(p.stock)||0}`;
+  $('tp-precio').value=Number(p.precio_venta)||0;
+  const box=$('tp-hits'); box.classList.remove('show');
+  $('tp-q').value=(p.codigo?p.codigo+' · ':'')+(p.nombre||'');
+}
+
+async function trbSaveItem(es_servicio){
+  const pref = es_servicio?'ts':'tp';
+  const producto_id = es_servicio ? Number($('ts-id').value)||null
+                                  : (window._trbProd? window._trbProd.id : null);
+  if(!producto_id){ $(pref+'-msg').innerHTML='<div class="msg error">Elegí un producto.</div>'; return; }
+  const cantidad=Number($(pref+'-cant').value)||1;
+  const precio=Number($(pref+'-precio').value)||0;
+  const {error}=await sb.from('trabajo_items').insert({
+    trabajo_id:TRB_ACTUAL.id, producto_id, cantidad, precio_unitario:precio, es_servicio
+  });
+  if(error){ $(pref+'-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  closeModal(); trbFicha(TRB_ACTUAL.id);
+}
+
+// ---- filtros sugeridos del vehículo -> agregar al trabajo ----
+async function trbFiltrosVehiculo(vehiculo_id){
+  const {data,error}=await sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:vehiculo_id});
+  if(error){ alert(error.message); return; }
+  if(!data||!data.length){
+    openModal('Filtros del vehículo','<div class="empty">Este vehículo no tiene filtros sugeridos. Vinculalo al catálogo desde su ficha.</div>',
+      `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`); return; }
+  const grupos={};
+  data.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||[]).push(r); });
+  openModal('Filtros para este vehículo',
+    Object.entries(grupos).map(([t,arr])=>`
+      <div class="vehf-paso">${t}</div>
+      ${arr.map(r=>`<label class="trb-sug">
+        <input type="checkbox" value="${r.producto_id}" data-precio="${r.precio||0}" data-cod="${r.codigo||''}">
+        <span><b style="color:var(--amber)">${r.codigo}</b> ${r.coincide_version?'<span class="tag ok">versión exacta</span>':''}
+          <div style="font-size:11px;color:var(--muted)">${r.descripcion||''}</div></span>
+        <span style="margin-left:auto;white-space:nowrap">
+          ${Number(r.stock)>0?`<span class="tag ok">${Number(r.stock)}</span>`:'<span class="tag pend">sin stock</span>'}
+          <b>${money(r.precio)}</b></span>
+      </label>`).join('')}`).join(''),
+    `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`);
+}
+async function trbAgregarSugeridos(){
+  const marcados=[...document.querySelectorAll('.trb-sug input:checked')];
+  if(!marcados.length){ closeModal(); return; }
+  const filas=marcados.map(c=>({
+    trabajo_id:TRB_ACTUAL.id, producto_id:Number(c.value),
+    cantidad:1, precio_unitario:Number(c.dataset.precio)||0, es_servicio:false
+  }));
+  const {error}=await sb.from('trabajo_items').insert(filas);
+  if(error){ alert(error.message); return; }
+  closeModal(); trbFicha(TRB_ACTUAL.id);
+}
+
+// ---- facturar ----
+async function trbFacturar(id){
+  const [c,a,t]=await Promise.all([
+    sb.from('cajas').select('id,nombre').eq('activo',true).order('id'),
+    sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id'),
+    sb.from('tipos_comprobante').select('id,nombre').eq('activo',true).order('id')
+  ]);
+  const a21=(a.data||[]).find(x=>Number(x.porcentaje)===21)||(a.data||[])[0];
+  openModal('Facturar trabajo',`
+    <div class="row2">
+      <div class="field"><label>Facturación</label>
+        <select id="tf-fact" onchange="trbFactToggle()">
+          <option value="si">Facturada</option><option value="no">Sin facturar</option></select></div>
+      <div class="field" id="tf-comp-w"><label>Comprobante</label>
+        <select id="tf-comp">${(t.data||[]).filter(x=>x.nombre!=='Sin comprobante').map(x=>`<option value="${x.id}">${x.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Condición</label>
+        <select id="tf-cond" onchange="trbFactToggle()">
+          <option value="contado">Contado</option><option value="cta_cte">Cuenta corriente</option></select></div>
+      <div class="field" id="tf-caja-w"><label>Caja</label>
+        <select id="tf-caja">${(c.data||[]).map(x=>`<option value="${x.id}">${x.nombre}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Alícuota IVA</label>
+      <select id="tf-alic">${(a.data||[]).map(x=>`<option value="${x.id}" ${a21&&x.id===a21.id?'selected':''}>${x.nombre}</option>`).join('')}</select></div>
+    <div id="tf-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" id="tf-ok" onclick="trbDoFacturar(${id})">Facturar</button>`);
+  trbFactToggle();
+}
+function trbFactToggle(){
+  const f=$('tf-fact'), cw=$('tf-comp-w'), c=$('tf-cond'), kw=$('tf-caja-w');
+  if(f&&cw) cw.style.display=f.value==='si'?'':'none';
+  if(c&&kw) kw.style.display=c.value==='contado'?'':'none';
+}
+async function trbDoFacturar(id){
+  const m=$('tf-msg'); const btn=$('tf-ok'); if(btn) btn.disabled=true;
+  m.innerHTML='<div class="msg ok">Facturando…</div>';
+  const fact=$('tf-fact').value==='si';
+  const cond=$('tf-cond').value;
+  const {data,error}=await sb.rpc('facturar_trabajo',{
+    p_trabajo_id:id, p_facturada:fact,
+    p_tipo_comprobante_id: fact?Number($('tf-comp').value)||null:null,
+    p_forma_pago:cond,
+    p_caja_id: cond==='contado'?Number($('tf-caja').value)||null:null,
+    p_alicuota_iva_id: fact?Number($('tf-alic').value)||null:null
+  });
+  if(error){
+    if(btn) btn.disabled=false;
+    let t=error.message||'Error';
+    if(/ya fue facturado/i.test(t)) t='Este trabajo ya tiene una venta asociada.';
+    else if(/sin ítems|no tiene ítems/i.test(t)) t='Cargá al menos un servicio o producto.';
+    else if(/cuenta corriente/i.test(t)) t='Para cuenta corriente el trabajo necesita un cliente.';
+    else if(/caja/i.test(t)) t='Elegí la caja donde entra el cobro.';
+    m.innerHTML='<div class="msg error">'+t+'</div>'; return;
+  }
+  m.innerHTML='<div class="msg ok">✓ Venta #'+data+' registrada.</div>';
+  setTimeout(()=>{ closeModal(); trbFicha(id); },1200);
+}
+
 PAGES.cobranzas=async ()=>{
   topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Registrar cobro (próximo)</button>`;
   await simpleList('cobranzas','Cobranzas',['Fecha','Medio','Monto',''],
@@ -1545,8 +1993,8 @@ async function usrGuardar(id){
 
 // ----- BUSCADOR (por vehículo o por código) -----
 let BUSCADOR_MODO='vehiculo';
-const BUS={tipo:null,marca:null,modelo:null,motor:null,anio:null,vista:'ficha'};
-let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[], BUS_VERSIONES=[], BUS_ANIOS=[], BUS_FILTROS=[];
+const BUS={tipo:null,marca:null,modelo:null,vista:'tabla'};
+let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[], BUS_FILTROS=[];
 let CART=[];
 
 PAGES.buscador=async ()=>{
@@ -1571,203 +2019,130 @@ function setModo(m){
   if(m==='vehiculo') formVehiculo(); else formCodigo();
 }
 
-// ============ MODO VEHÍCULO: cascada TIPO > MARCA > MODELO ============
-// (motor y año quedan como refinamiento opcional, después del modelo)
+// ============ MODO VEHÍCULO: TIPO > MARCA > MODELO ============
+// Al elegir el modelo se muestran TODAS sus aplicaciones.
+// No hay selector de motor: el motor es un dato de cada aplicación.
 async function formVehiculo(){
   $('bform').innerHTML=`
     <div class="bus-grid3">
       <div class="field" style="margin:0">
         <label>1. Tipo de vehículo</label>
-        <select id="bus-tipo" onchange="busSetTipo(this.value)">
-          <option value="">Cargando…</option>
-        </select>
-      </div>
+        <select id="bus-tipo" onchange="busSetTipo(this.value)"><option value="">Cargando…</option></select></div>
       <div class="field" style="margin:0">
         <label>2. Marca</label>
         <select id="bus-marca" onchange="busSetMarca(this.value)" disabled>
-          <option value="">Seleccionar marca</option>
-        </select>
-      </div>
+          <option value="">Seleccionar marca</option></select></div>
       <div class="field" style="margin:0">
         <label>3. Modelo</label>
         <select id="bus-modelo" onchange="busSetModelo(this.value)" disabled>
-          <option value="">Seleccionar modelo</option>
-        </select>
-      </div>
-    </div>
-    <div id="bus-refina" style="display:none">
-      <div class="bus-refina-t">Refinar (opcional)</div>
-      <div class="bus-grid2">
-        <div class="field" style="margin:0">
-          <label>Motor / versión</label>
-          <select id="bus-motor" onchange="busSetMotor(this.value)"></select>
-        </div>
-        <div class="field" style="margin:0">
-          <label>Año</label>
-          <select id="bus-anio" onchange="busSetAnio(this.value)"></select>
-        </div>
-      </div>
+          <option value="">Seleccionar modelo</option></select></div>
     </div>
     <div class="bus-actions">
       <span id="bus-sel" class="bus-sel"></span>
       <span style="flex:1"></span>
       <div class="cmp-toggle" style="width:200px">
-        <button id="v-ficha" class="${BUS.vista==='ficha'?'on':''}" onclick="busVista('ficha')">Ficha</button>
         <button id="v-tabla" class="${BUS.vista==='tabla'?'on':''}" onclick="busVista('tabla')">Tabla</button>
+        <button id="v-ficha" class="${BUS.vista==='ficha'?'on':''}" onclick="busVista('ficha')">Ficha</button>
       </div>
       <button class="btn btn-ghost btn-sm" onclick="busLimpiar()">Limpiar</button>
     </div>`;
-
   if(!BUS_TIPOS){
     const {data,error}=await sb.rpc('cat_tipos');
     if(error){ $('bform').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
     BUS_TIPOS=data||[];
   }
-  const st=$('bus-tipo');
-  st.innerHTML='<option value="">Seleccionar tipo de vehículo</option>'+
-    BUS_TIPOS.map(t=>`<option value="${(t.tipo||'').replace(/"/g,'&quot;')}" ${BUS.tipo===t.tipo?'selected':''}>${t.tipo} (${t.filtros})</option>`).join('');
-
-  // si ya había una selección previa, la restauramos
-  if(BUS.tipo){ await busCargarMarcas(); }
+  $('bus-tipo').innerHTML='<option value="">Seleccionar tipo de vehículo</option>'+
+    BUS_TIPOS.map(t=>`<option value="${(t.tipo||'').replace(/"/g,'&quot;')}" ${BUS.tipo===t.tipo?'selected':''}>${t.tipo}</option>`).join('');
+  if(BUS.tipo) await busCargarMarcas(true);
   busInfo();
 }
 
-// ---- paso 1: TIPO ----
 async function busSetTipo(v){
   BUS.tipo = v || null;
-  BUS.marca=null; BUS.modelo=null; BUS.motor=null; BUS.anio=null;
-  BUS_MARCAS=[]; BUS_MODELOS=[]; BUS_VERSIONES=[]; BUS_ANIOS=[]; BUS_FILTROS=[];
+  BUS.marca=null; BUS.modelo=null;
+  BUS_MARCAS=[]; BUS_MODELOS=[]; BUS_FILTROS=[];
   $('bres').innerHTML='';
   busResetSelect('bus-modelo','Seleccionar modelo', true);
-  busOcultarRefinar();
   if(!BUS.tipo){ busResetSelect('bus-marca','Seleccionar marca', true); busInfo(); return; }
-  await busCargarMarcas();
+  await busCargarMarcas(false);
   busInfo();
 }
-
-async function busCargarMarcas(){
-  const sel=$('bus-marca'); if(!sel) return;
-  sel.disabled=true; sel.innerHTML='<option value="">Cargando…</option>';
+async function busCargarMarcas(mantener){
+  const s=$('bus-marca'); if(!s) return;
+  s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
   const {data}=await sb.rpc('cat_marcas',{p_tipo:BUS.tipo});
   BUS_MARCAS=data||[];
-  sel.innerHTML='<option value="">Seleccionar marca</option>'+
-    BUS_MARCAS.map(m=>`<option value="${(m.marca||'').replace(/"/g,'&quot;')}" ${BUS.marca===m.marca?'selected':''}>${m.marca} (${m.filtros})</option>`).join('');
-  sel.disabled=false;
-  if(BUS.marca) await busCargarModelos();
+  s.innerHTML='<option value="">Seleccionar marca</option>'+
+    BUS_MARCAS.map(m=>`<option value="${m.marca.replace(/"/g,'&quot;')}" ${mantener&&BUS.marca===m.marca?'selected':''}>${m.marca}</option>`).join('');
+  s.disabled=false;
+  if(mantener && BUS.marca) await busCargarModelos(true);
 }
 
-// ---- paso 2: MARCA ----
 async function busSetMarca(v){
   BUS.marca = v || null;
-  BUS.modelo=null; BUS.motor=null; BUS.anio=null;
-  BUS_MODELOS=[]; BUS_VERSIONES=[]; BUS_ANIOS=[]; BUS_FILTROS=[];
+  BUS.modelo=null; BUS_MODELOS=[]; BUS_FILTROS=[];
   $('bres').innerHTML='';
-  busOcultarRefinar();
   if(!BUS.marca){ busResetSelect('bus-modelo','Seleccionar modelo', true); busInfo(); return; }
-  await busCargarModelos();
+  await busCargarModelos(false);
   busInfo();
 }
-
-async function busCargarModelos(){
-  const sel=$('bus-modelo'); if(!sel) return;
-  sel.disabled=true; sel.innerHTML='<option value="">Cargando…</option>';
+async function busCargarModelos(mantener){
+  const s=$('bus-modelo'); if(!s) return;
+  s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
   const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca,p_tipo:BUS.tipo});
   BUS_MODELOS=data||[];
-  sel.innerHTML='<option value="">Seleccionar modelo</option>'+
-    '<option value="__TODOS__">— Todos los modelos —</option>'+
-    BUS_MODELOS.map(m=>`<option value="${(m.modelo||'').replace(/"/g,'&quot;')}">${m.modelo} (${m.filtros})</option>`).join('');
-  sel.disabled=false;
+  s.innerHTML='<option value="">Seleccionar modelo</option>'+
+    BUS_MODELOS.map(m=>`<option value="${m.modelo.replace(/"/g,'&quot;')}" ${mantener&&BUS.modelo===m.modelo?'selected':''}>${m.modelo}</option>`).join('');
+  s.disabled=false;
+  if(mantener && BUS.modelo) busBuscar();
 }
 
-// ---- paso 3: MODELO -> resultados ----
-async function busSetModelo(v){
-  if(!v){ BUS.modelo=null; BUS.motor=null; BUS.anio=null;
-          $('bres').innerHTML=''; busOcultarRefinar(); busInfo(); return; }
-  BUS.modelo = (v==='__TODOS__') ? null : v;
-  BUS._todosModelos = (v==='__TODOS__');
-  BUS.motor=null; BUS.anio=null;
-  if(BUS.modelo){ await busCargarVersiones(); $('bus-refina').style.display=''; }
-  else { busOcultarRefinar(); }
+function busSetModelo(v){
+  BUS.modelo = v || null;
+  if(!BUS.modelo){ $('bres').innerHTML=''; busInfo(); return; }
   busInfo(); busBuscar();
-}
-
-function busOcultarRefinar(){
-  const r=$('bus-refina'); if(r) r.style.display='none';
-  busResetSelect('bus-motor','Todos los motores', false);
-  busResetSelect('bus-anio','Todos los años', false);
 }
 function busResetSelect(id, label, disable){
   const s=$(id); if(!s) return;
   s.innerHTML='<option value="">'+label+'</option>';
   if(disable!==undefined) s.disabled=!!disable;
 }
-
-// ---- refinamiento opcional ----
-async function busCargarVersiones(){
-  const sm=$('bus-motor'); if(!sm) return;
-  sm.disabled=true; sm.innerHTML='<option value="">Cargando…</option>';
-  const {data}=await sb.rpc('cat_versiones',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo});
-  BUS_VERSIONES=data||[];
-  sm.innerHTML='<option value="">Todos los motores</option>'+
-    BUS_VERSIONES.map(v=>`<option value="${(v.motor||'').replace(/"/g,'&quot;')}">${v.motor} (${v.filtros})</option>`).join('');
-  sm.disabled=false;
-  await busCargarAnios();
-}
-async function busSetMotor(v){
-  BUS.motor=v||null; BUS.anio=null;
-  await busCargarAnios(); busInfo(); busBuscar();
-}
-async function busCargarAnios(){
-  const sa=$('bus-anio'); if(!sa) return;
-  sa.disabled=true; sa.innerHTML='<option value="">Cargando…</option>';
-  const {data}=await sb.rpc('cat_anios',
-    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_tipo:BUS.tipo});
-  BUS_ANIOS=data||[];
-  sa.innerHTML='<option value="">Todos los años</option>'+
-    BUS_ANIOS.map(a=>`<option value="${a.anio}">${a.anio} (${a.filtros})</option>`).join('');
-  sa.disabled=false;
-}
-function busSetAnio(v){ BUS.anio=v?Number(v):null; busInfo(); busBuscar(); }
-
 function busVista(v){
   BUS.vista=v;
   const a=$('v-ficha'), b=$('v-tabla');
   if(a&&b){ a.classList.toggle('on',v==='ficha'); b.classList.toggle('on',v==='tabla'); }
-  if(BUS.marca && (BUS.modelo || BUS._todosModelos)) busBuscar();
+  if(BUS.marca && BUS.modelo) busBuscar();
 }
 function busLimpiar(){
-  BUS.tipo=null;BUS.marca=null;BUS.modelo=null;BUS.motor=null;BUS.anio=null;BUS._todosModelos=false;
-  BUS_MARCAS=[];BUS_MODELOS=[];BUS_VERSIONES=[];BUS_ANIOS=[];BUS_FILTROS=[];
+  BUS.tipo=null;BUS.marca=null;BUS.modelo=null;
+  BUS_MARCAS=[];BUS_MODELOS=[];BUS_FILTROS=[];
   formVehiculo(); $('bres').innerHTML='';
 }
 function busInfo(){
   const el=$('bus-sel'); if(!el) return;
   if(!BUS.tipo){ el.textContent='Elegí el tipo de vehículo para empezar'; return; }
   if(!BUS.marca){ el.textContent='Tipo: '+BUS.tipo+' — elegí una marca'; return; }
-  if(!BUS.modelo && !BUS._todosModelos){ el.textContent=BUS.tipo+' · '+BUS.marca+' — elegí un modelo'; return; }
-  const partes=[BUS.marca, BUS._todosModelos?'todos los modelos':BUS.modelo, BUS.motor, BUS.anio].filter(Boolean);
-  el.innerHTML=BUS.tipo+': <b style="color:var(--text)">'+partes.join(' · ')+'</b>';
+  if(!BUS.modelo){ el.textContent=BUS.tipo+' · '+BUS.marca+' — elegí un modelo'; return; }
+  el.innerHTML=BUS.tipo+': <b style="color:var(--text)">'+BUS.marca+' · '+BUS.modelo+'</b>';
 }
 
 async function busBuscar(){
-  if(!BUS.marca || (!BUS.modelo && !BUS._todosModelos)) return;
+  if(!BUS.marca || !BUS.modelo) return;
   if(BUS.vista==='tabla') return busTabla();
-  const box=$('bres'); box.innerHTML='<div class="loading">Buscando filtros…</div>';
+  const box=$('bres'); box.innerHTML='<div class="loading">Buscando…</div>';
   const {data,error}=await sb.rpc('cat_filtros',
-    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:BUS.motor,p_anio:BUS.anio,p_tipo:BUS.tipo});
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:null,p_anio:null,p_tipo:BUS.tipo});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
   BUS_FILTROS=data||[];
   if(!BUS_FILTROS.length){
-    box.innerHTML='<div class="panel"><div class="empty">No hay filtros cargados para esa combinación.<br>'+
-      '<span style="font-size:12px">Probá quitando el año o el motor para ampliar la búsqueda.</span></div></div>'; return; }
+    box.innerHTML='<div class="panel"><div class="empty">No hay productos cargados para ese vehículo.</div></div>'; return; }
   const grupos={};
   BUS_FILTROS.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
   const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
-  const partes=[BUS.marca, BUS._todosModelos?'(todos los modelos)':BUS.modelo, BUS.motor, BUS.anio].filter(Boolean).join(' ');
   box.innerHTML=`
     <div class="veh-card">
       <div class="veh-card-t">Vehículo seleccionado</div>
-      <div class="veh-card-n">${partes}</div>
+      <div class="veh-card-n">${BUS.marca} ${BUS.modelo}</div>
       <div class="veh-card-s">${BUS_FILTROS.length} producto(s) aplicable(s)</div>
       <button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar todos</button>
     </div>`+
@@ -1780,7 +2155,7 @@ async function busBuscar(){
             <div class="filtro-main">
               <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
               <div class="filtro-desc">${r.descripcion||''}</div>
-              <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}${r.anio_incierto?' <span class="tag warn">año no especificado</span>':''}</div>
+              <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}</div>
             </div>
             <div class="filtro-meta">
               ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
@@ -1794,29 +2169,55 @@ async function busBuscar(){
   renderCart();
 }
 
+// ---- TABLA DE APLICACIONES (vista principal) ----
+// Una fila = una aplicación vehicular, con sus propios productos.
 async function busTabla(){
   const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
-  const {data,error}=await sb.rpc('cat_tabla',{p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo});
+  const {data,error}=await sb.rpc('cat_tabla',
+    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo,p_anio:null});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">Sin aplicaciones cargadas.</div></div>'; return; }
-  const cel=(v)=>v?v.split(', ').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>'):'<span style="color:var(--muted)">—</span>';
-  box.innerHTML=`<div class="panel">
-    <div class="panel-head"><h3>Catálogo — ${BUS.marca}${BUS.modelo?' '+BUS.modelo:''}</h3>
-      <span style="color:var(--muted);font-size:12px">${data.length} aplicaciones</span></div>
-    <div class="tabla-wrap">
-    <table class="cat-tabla">
-      <thead><tr><th>Modelo</th><th>Motor</th><th>Año</th><th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th><th>Otros</th></tr></thead>
-      <tbody>${data.map(r=>`<tr>
-        <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
-        <td data-l="Motor">${r.motor||'—'}</td>
-        <td data-l="Año">${r.anio||'—'}</td>
-        <td data-l="Aire">${cel(r.aire)}</td>
-        <td data-l="Aceite">${cel(r.aceite)}</td>
-        <td data-l="Combustible">${cel(r.combustible)}</td>
-        <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
-        <td data-l="Otros">${cel(r.otros)}</td>
-      </tr>`).join('')}</tbody>
-    </table></div></div>`;
+  if(!data||!data.length){
+    box.innerHTML='<div class="panel"><div class="empty">No hay aplicaciones cargadas para ese vehículo.</div></div>'; return; }
+
+  // celda: varios códigos, uno debajo del otro, clickeables
+  const cel=(v)=>!v ? '<span class="cat-vacio">—</span>'
+    : v.split('\n').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>');
+  const totalProd=data.reduce((s,r)=>s+(Number(r.total)||0),0);
+
+  box.innerHTML=`
+    <div class="veh-card">
+      <div class="veh-card-t">Vehículo seleccionado</div>
+      <div class="veh-card-n">${BUS.marca} — ${BUS.modelo}</div>
+      <div class="veh-card-s">${data.length} aplicación(es) · ${totalProd} producto(s)</div>
+    </div>
+    <div class="panel">
+      <div class="tabla-wrap">
+        <table class="cat-tabla">
+          <thead><tr>
+            <th>Modelo</th><th>Motor / versión</th><th>Año</th>
+            <th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th>
+            <th>Caja</th><th>Accesorios</th><th>Otros</th>
+          </tr></thead>
+          <tbody>${data.map(r=>`<tr>
+            <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
+            <td data-l="Motor / versión" class="cat-motor">${r.motor||'—'}</td>
+            <td data-l="Año" class="cat-anio">${r.anio||'—'}</td>
+            <td data-l="Aire">${cel(r.aire)}</td>
+            <td data-l="Aceite">${cel(r.aceite)}</td>
+            <td data-l="Combustible">${cel(r.combustible)}</td>
+            <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
+            <td data-l="Caja">${cel(r.caja)}</td>
+            <td data-l="Accesorios">${cel(r.accesorios)}</td>
+            <td data-l="Otros">${cel(r.otros)}</td>
+          </tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="color:var(--muted);font-size:12px;margin-top:10px">
+      Cada fila es una aplicación distinta y conserva sus propios productos.
+      Tocá un código para ver el producto y agregarlo a la venta.
+    </div>`;
+  renderCart();
 }
 
 // ---- detalle de producto ----
