@@ -1931,16 +1931,25 @@ async function trbFiltrosVehiculo(vehiculo_id){
     Object.entries(grupos).map(([t,arr])=>`
       <div class="vehf-paso">${t}</div>
       ${arr.map(r=>`<label class="trb-sug">
-        <input type="checkbox" value="${r.producto_id}" data-precio="${r.precio||0}" data-cod="${r.codigo||''}">
+        <input type="checkbox" value="${r.producto_id||''}" data-precio="${r.precio||0}" data-cod="${r.codigo||''}"
+               ${r.producto_id?'':'disabled title="Sin producto cargado en Lubrimax"'}>
         <span><b style="color:var(--amber)">${r.codigo}</b> ${r.coincide_version?'<span class="tag ok">versión exacta</span>':''}
           <div style="font-size:11px;color:var(--muted)">${r.descripcion||''}</div></span>
-        <span style="margin-left:auto;white-space:nowrap">
-          ${Number(r.stock)>0?`<span class="tag ok">${Number(r.stock)}</span>`:'<span class="tag pend">sin stock</span>'}
-          <b>${money(r.precio)}</b></span>
+        <span style="margin-left:auto;white-space:nowrap">${estadoComercial(r)}</span>
       </label>`).join('')}`).join(''),
     `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
      <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`);
 }
+// Estado comercial de un código: la aplicación existe siempre; el producto no.
+function estadoComercial(r){
+  switch(r.estado_comercial){
+    case 'no_cargado': return '<span class="tag pend">No cargado en catálogo Lubrimax</span>';
+    case 'sin_precio': return '<span class="tag warn">Sin precio cargado</span>';
+    case 'sin_stock' : return '<span class="tag warn">Sin stock</span> <b>'+money(r.precio)+'</b>';
+    default          : return '<span class="tag ok">Stock '+Number(r.stock)+'</span> <b>'+money(r.precio)+'</b>';
+  }
+}
+
 async function trbAgregarSugeridos(){
   const marcados=[...document.querySelectorAll('.trb-sug input:checked')];
   if(!marcados.length){ closeModal(); return; }
@@ -2685,7 +2694,7 @@ async function busTabla(){
           <thead><tr>
             <th>Modelo</th><th>Motor / versión</th><th>Año</th>
             <th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th>
-            <th>Caja</th><th>Accesorios</th><th>Otros</th>
+            <th>Caja</th><th>Kits</th><th>Accesorios</th><th>Otros</th>
           </tr></thead>
           <tbody>${data.map(r=>`<tr>
             <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
@@ -2696,6 +2705,7 @@ async function busTabla(){
             <td data-l="Combustible">${cel(r.combustible)}</td>
             <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
             <td data-l="Caja">${cel(r.caja)}</td>
+            <td data-l="Kits">${cel(r.kits)}</td>
             <td data-l="Accesorios">${cel(r.accesorios)}</td>
             <td data-l="Otros">${cel(r.otros)}</td>
           </tr>`).join('')}</tbody>
@@ -2730,7 +2740,16 @@ async function verProducto(id){
 }
 async function verProductoPorCodigo(cod){
   const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
-  if(data&&data[0]) verProducto(data[0].id);
+  if(data&&data[0]){ verProducto(data[0].id); return; }
+  // La aplicación existe en el catálogo pero Lubrimax no tiene el producto.
+  openModal(cod,`
+    <div class="msg error" style="margin:0">No cargado en catálogo Lubrimax</div>
+    <div style="font-size:13px;color:var(--muted);margin-top:12px">
+      El código <b style="color:var(--amber)">${cod}</b> corresponde a este vehículo según el
+      catálogo, pero todavía no existe como producto en Lubrimax, así que no tiene
+      precio ni stock.<br><br>Podés cargarlo desde <b>Productos y servicios</b>.
+    </div>`,
+    `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`);
 }
 
 // ============ CARRITO ============
