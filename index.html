@@ -368,6 +368,17 @@ select:disabled{opacity:.5}
 .cc-pend{margin:0 0 4px;padding:14px 18px;border-bottom:1px solid var(--line)}
 .cc-pend-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--amber);margin-bottom:8px}
 @media(max-width:860px){ .caj-grid{grid-template-columns:1fr} }
+
+.trb-veh{background:var(--panel-2);border:1px solid var(--line);border-left:3px solid var(--amber);
+  border-radius:var(--radius);padding:12px 14px;margin-bottom:14px}
+.trb-veh-k{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.trb-veh-v{font-size:14px;font-weight:600;margin-top:2px}
+.trb-otras{margin:22px 0 4px;padding-top:14px;border-top:1px solid var(--line);
+  font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+.trb-motor{font-size:13px;font-weight:600;color:var(--text);margin:14px 0 2px}
+.trb-alt{font-size:10px;color:var(--muted);border:1px solid var(--line);
+  padding:1px 6px;border-radius:10px;margin-left:6px}
+.trb-sug.sin-prod{opacity:.62}
 </style>
 </head>
 <body>
@@ -973,10 +984,18 @@ async function vehFicha(id){
   if(!v){ const {data}=await sb.from('vehiculos').select('*').eq('id',id).single(); v=data; }
   if(!v){ content.innerHTML='<div class="msg error">Vehículo no encontrado.</div>'; return; }
   VEH_ACTUAL=v;
-  const [{data:hist},{data:filt}]=await Promise.all([
+  const [{data:hist},{data:filtRaw}]=await Promise.all([
     sb.rpc('vehiculo_historial',{p_vehiculo_id:id}),
     sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:id})
   ]);
+  // la RPC devuelve una fila por aplicación: se deduplica por código,
+  // priorizando la de la versión exacta del vehículo
+  const vistosCod={}; const filt=[];
+  (filtRaw||[]).forEach(r=>{
+    const k=r.codigo||'';
+    if(!vistosCod[k]){ vistosCod[k]=r; filt.push(r); }
+    else if(r.es_exacta && !vistosCod[k].es_exacta){ Object.assign(vistosCod[k], r); }
+  });
   pageTitle.textContent=(v.patente||'Vehículo');
   topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="cliFicha(${CLI_ACTUAL?CLI_ACTUAL.id:v.cliente_id})">← Cliente</button>
     <button class="btn btn-sm" onclick='formVehiculoCliente(${CLI_ACTUAL?CLI_ACTUAL.id:v.cliente_id},${JSON.stringify(v).replace(/'/g,"&#39;")})'>Editar</button>`;
@@ -1018,9 +1037,9 @@ async function vehFicha(id){
       items.map(r=>`<div class="filtro-row">
         <div class="filtro-main">
           <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
-          ${r.coincide_version?'<span class="tag ok">versión exacta</span>':''}
+          ${r.es_exacta?'<span class="tag ok">versión exacta</span>':''}
           <div class="filtro-desc">${t} · ${r.descripcion||''}</div>
-          <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}</div>
+          <div class="filtro-apl">Aplica a: ${r.motor||'—'}${r.anio&&r.anio!=='—'?' · '+r.anio:''}</div>
         </div>
         <div class="filtro-meta">
           ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
@@ -1919,44 +1938,92 @@ async function trbSaveItem(es_servicio){
 }
 
 // ---- filtros sugeridos del vehículo -> agregar al trabajo ----
+// El vehículo del cliente tiene una versión concreta: su aplicación va primero,
+// preseleccionada. Las demás versiones del modelo quedan abajo, sin marcar.
 async function trbFiltrosVehiculo(vehiculo_id){
   const {data,error}=await sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:vehiculo_id});
   if(error){ alert(error.message); return; }
   if(!data||!data.length){
-    openModal('Filtros del vehículo','<div class="empty">Este vehículo no tiene filtros sugeridos. Vinculalo al catálogo desde su ficha.</div>',
+    openModal('Filtros para este vehículo',
+      '<div class="empty">Este vehículo no tiene filtros sugeridos. Vinculalo al catálogo desde su ficha.</div>',
       `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`); return; }
-  const grupos={};
-  data.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||[]).push(r); });
-  openModal('Filtros para este vehículo',
-    Object.entries(grupos).map(([t,arr])=>`
-      <div class="vehf-paso">${t}</div>
-      ${arr.map(r=>`<label class="trb-sug">
-        <input type="checkbox" value="${r.producto_id||''}" data-precio="${r.precio||0}" data-cod="${r.codigo||''}"
-               ${r.producto_id?'':'disabled title="Sin producto cargado en Lubrimax"'}>
-        <span><b style="color:var(--amber)">${r.codigo}</b> ${r.coincide_version?'<span class="tag ok">versión exacta</span>':''}
-          <div style="font-size:11px;color:var(--muted)">${r.descripcion||''}</div></span>
-        <span style="margin-left:auto;white-space:nowrap">${estadoComercial(r)}</span>
-      </label>`).join('')}`).join(''),
+
+  const {data:v}=await sb.from('vehiculos').select('marca,modelo,version,patente').eq('id',vehiculo_id).single();
+  const exactas = data.filter(r=>r.es_exacta);
+  const otras   = data.filter(r=>!r.es_exacta);
+
+  // Dentro de la aplicación exacta se preselecciona UNA opción por categoría.
+  // Las demás quedan visibles como alternativa, para que las elija el usuario.
+  const yaMarcada={};
+  const fila=(r, preseleccionable)=>{
+    const sinProd = !r.producto_id;
+    let marcar=false, alt=false;
+    if(preseleccionable && !sinProd){
+      if(!yaMarcada[r.tipo]){ yaMarcada[r.tipo]=true; marcar=true; } else { alt=true; }
+    } else if(preseleccionable && sinProd){ alt=false; }
+    return `<label class="trb-sug${sinProd?' sin-prod':''}">
+      <input type="checkbox" value="${r.producto_id||''}" data-precio="${r.precio||0}"
+             data-cod="${r.codigo||''}" ${marcar?'checked':''}
+             ${sinProd?'disabled title="Sin producto cargado en Lubrimax"':''}>
+      <span><b style="color:var(--amber)">${r.codigo}</b>
+        ${alt?'<span class="trb-alt">alternativa</span>':''}
+        <div style="font-size:11px;color:var(--muted)">${r.descripcion||''}</div></span>
+      <span style="margin-left:auto;white-space:nowrap">${estadoComercial(r)}</span>
+    </label>`;
+  };
+
+  const porCategoria=(filas, preseleccionable)=>{
+    const g={};
+    filas.forEach(r=>{ (g[r.tipo]=g[r.tipo]||[]).push(r); });
+    return Object.entries(g).map(([cat,arr])=>
+      `<div class="vehf-paso">${cat}</div>${arr.map(r=>fila(r,preseleccionable)).join('')}`).join('');
+  };
+
+  let html='';
+  if(exactas.length){
+    const e=exactas[0];
+    html += `<div class="trb-veh">
+        <div class="trb-veh-k">Vehículo del cliente</div>
+        <div class="trb-veh-v">${[v?v.marca:'',v?v.modelo:'',v?v.version:''].filter(Boolean).join(' ')}
+          ${v&&v.patente?`<span style="color:var(--muted);font-size:12px">· ${v.patente}</span>`:''}</div>
+        <div class="trb-veh-k" style="margin-top:8px">Aplicación encontrada</div>
+        <div class="trb-veh-v">${e.motor} · ${e.anio} <span class="tag ok">versión exacta</span></div>
+      </div>`;
+    html += porCategoria(exactas, true);
+  } else {
+    html += `<div class="msg error" style="margin-bottom:12px">
+      No se identificó la versión exacta de este vehículo. Revisá su ficha y vinculalo al catálogo.
+    </div>`;
+  }
+
+  if(otras.length){
+    const porMotor={};
+    otras.forEach(r=>{ (porMotor[r.motor+' · '+r.anio]=porMotor[r.motor+' · '+r.anio]||[]).push(r); });
+    html += `<div class="trb-otras">Otras aplicaciones del mismo modelo</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">
+        No corresponden a la versión cargada. Empiezan sin marcar.</div>`;
+    html += Object.entries(porMotor).map(([m,arr])=>
+      `<div class="trb-motor">${m}</div>${porCategoria(arr,false)}`).join('');
+  }
+
+  openModal('Filtros para este vehículo', html,
     `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
      <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`);
 }
-// Estado comercial de un código: la aplicación existe siempre; el producto no.
-function estadoComercial(r){
-  switch(r.estado_comercial){
-    case 'no_cargado': return '<span class="tag pend">No cargado en catálogo Lubrimax</span>';
-    case 'sin_precio': return '<span class="tag warn">Sin precio cargado</span>';
-    case 'sin_stock' : return '<span class="tag warn">Sin stock</span> <b>'+money(r.precio)+'</b>';
-    default          : return '<span class="tag ok">Stock '+Number(r.stock)+'</span> <b>'+money(r.precio)+'</b>';
-  }
-}
 
 async function trbAgregarSugeridos(){
-  const marcados=[...document.querySelectorAll('.trb-sug input:checked')];
+  // Sólo lo tildado. Nada se agrega automáticamente al abrir el modal.
+  const marcados=[...document.querySelectorAll('.trb-sug input:checked:not(:disabled)')];
   if(!marcados.length){ closeModal(); return; }
-  const filas=marcados.map(c=>({
-    trabajo_id:TRB_ACTUAL.id, producto_id:Number(c.value),
-    cantidad:1, precio_unitario:Number(c.dataset.precio)||0, es_servicio:false
-  }));
+  const vistos={};
+  const filas=[];
+  marcados.forEach(c=>{
+    const id=Number(c.value); if(!id || vistos[id]) return;   // sin duplicados
+    vistos[id]=true;
+    filas.push({trabajo_id:TRB_ACTUAL.id, producto_id:id,
+                cantidad:1, precio_unitario:Number(c.dataset.precio)||0, es_servicio:false});
+  });
+  if(!filas.length){ closeModal(); return; }
   const {error}=await sb.from('trabajo_items').insert(filas);
   if(error){ alert(error.message); return; }
   closeModal(); trbFicha(TRB_ACTUAL.id);
