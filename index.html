@@ -391,6 +391,41 @@ select:disabled{opacity:.5}
 .fil-otras{margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}
 .fil-toggle{background:none;color:var(--text);font-size:13px;font-weight:600;padding:4px 0}
 .fil-toggle:hover{color:var(--amber)}
+
+/* ---- modal ancho (usado por Ver filtros de este vehículo) ---- */
+.modal.modal-xl{width:min(1200px, calc(100vw - 60px));max-width:none;
+  max-height:min(880px, calc(100vh - 60px));
+  display:flex;flex-direction:column;overflow:hidden}
+.modal.modal-xl .modal-head{flex-shrink:0}
+.modal.modal-xl .modal-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+.modal.modal-xl .modal-foot{flex-shrink:0}
+
+/* la tabla se adapta al ancho: nunca scroll horizontal */
+.fil-wrap{width:100%;overflow-x:visible}
+.fil-tabla{table-layout:fixed}
+.fil-tabla th:nth-child(1),.fil-tabla td:nth-child(1){width:11%}
+.fil-tabla th:nth-child(2),.fil-tabla td:nth-child(2){width:14%}
+.fil-tabla th:nth-child(3),.fil-tabla td:nth-child(3){width:35%}
+.fil-tabla th:nth-child(4),.fil-tabla td:nth-child(4){width:12%;white-space:nowrap}
+.fil-tabla th:nth-child(5),.fil-tabla td:nth-child(5){width:20%;white-space:nowrap}
+.fil-tabla th:nth-child(6),.fil-tabla td:nth-child(6){width:8%;text-align:center}
+.fil-tabla td:nth-child(2){white-space:nowrap}
+.fil-desc{color:var(--muted);font-size:11px;max-width:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fil-tabla .tag{white-space:nowrap}
+.fil-chk{width:16px;height:16px;cursor:pointer}
+
+@media(max-width:900px){
+  .modal.modal-xl{width:calc(100vw - 24px)}
+  /* en pantallas chicas la tabla se vuelve tarjetas, sin scroll horizontal */
+  .fil-tabla, .fil-tabla tbody, .fil-tabla tr, .fil-tabla td{display:block;width:100%}
+  .fil-tabla thead{display:none}
+  .fil-tabla tr{border:1px solid var(--line);border-radius:var(--radius);
+    margin-bottom:10px;padding:8px 10px;background:var(--graphite)}
+  .fil-tabla td{border:none;padding:3px 0;white-space:normal}
+  .fil-desc{white-space:normal}
+  .fil-tabla th:nth-child(n),.fil-tabla td:nth-child(n){width:auto}
+}
 </style>
 </head>
 <body>
@@ -541,7 +576,12 @@ function tableShell(title,cols,rowsHtml,addBtn){
     <tbody>${rowsHtml||`<tr><td colspan="${cols.length}"><div class="empty">Sin registros todavía.</div></td></tr>`}</tbody></table></div>`;
 }
 // Modal
-function openModal(title,bodyHtml,footHtml){mTitle.textContent=title;mBody.innerHTML=bodyHtml;mFoot.innerHTML=footHtml;overlay.classList.add('show');}
+function openModal(title,bodyHtml,footHtml,tamano){
+  mTitle.textContent=title;mBody.innerHTML=bodyHtml;mFoot.innerHTML=footHtml;
+  const m=overlay.querySelector('.modal');
+  if(m) m.classList.toggle('modal-xl', tamano==='xl');
+  overlay.classList.add('show');
+}
 function closeModal(){overlay.classList.remove('show');}
 
 // ============ PAGINAS ============
@@ -1950,6 +1990,12 @@ async function trbSaveItem(es_servicio){
 }
 
 // ---- filtros sugeridos del vehículo -> agregar al trabajo ----
+// Recorta la descripción comercial: en esta pantalla ya sabemos el vehículo,
+// no hace falta la lista completa de aplicaciones del producto.
+function corto(txt, n){
+  const t=(txt||'').trim();
+  return t.length<=n ? t : t.slice(0,n).replace(/\s+\S*$/,'')+'…';
+}
 // Estado comercial de un código: la aplicación existe siempre; el producto no.
 function estadoComercial(r){
   switch(r.estado_comercial){
@@ -1988,7 +2034,9 @@ async function trbFiltrosVehiculo(vehiculo_id){
       <td class="fil-cat">${mostrarCat?r.tipo:''}</td>
       <td><b style="color:var(--amber)">${r.codigo}</b>
         ${alt?'<span class="trb-alt">alternativa</span>':''}</td>
-      <td class="fil-desc">${sinProd?'<i style="color:var(--muted)">sin producto</i>':(r.descripcion||'')}</td>
+      <td class="fil-desc" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">${
+        sinProd ? '<i style="color:var(--muted)">sin producto en el catálogo</i>'
+                : corto(r.descripcion, 55)}</td>
       <td class="cmp-num">${r.precio!=null?money(r.precio):'—'}</td>
       <td>${estadoComercial(r)}</td>
       <td style="text-align:center">
@@ -2001,7 +2049,7 @@ async function trbFiltrosVehiculo(vehiculo_id){
 
   const tabla=(filas, preseleccionable)=>{
     let cat=null;
-    return `<div class="tabla-wrap"><table class="fil-tabla">
+    return `<div class="fil-wrap"><table class="fil-tabla">
       <thead><tr><th>Categoría</th><th>Código</th><th>Producto Lubrimax</th>
         <th class="cmp-num">Precio</th><th>Disponibilidad</th><th style="text-align:center">Agregar</th></tr></thead>
       <tbody>${filas.map(r=>{
@@ -2043,7 +2091,7 @@ async function trbFiltrosVehiculo(vehiculo_id){
 
   openModal('Filtros para este vehículo', html,
     `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
-     <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`);
+     <button class="btn" onclick="trbAgregarSugeridos()">+ Agregar al trabajo</button>`, 'xl');
 }
 
 function filToggleOtras(){
