@@ -548,9 +548,19 @@ async function doLogin(){
 }
 async function doLogout(){await sb.auth.signOut();}
 
+// La app entra UNA sola vez. Supabase dispara este evento también al refrescar
+// el token (por ejemplo al volver a la pestaña); si en ese caso se llamara a
+// enterApp() se perdería la pantalla en la que estaba el usuario.
+let APP_INICIADA=false;
 sb.auth.onAuthStateChange(async (_e,session)=>{
-  if(session?.user){currentUser=session.user; await loadProfile(); enterApp();}
-  else {currentUser=null;currentProfile=null;document.getElementById('login').style.display='flex';document.getElementById('app').style.display='none';}
+  if(session?.user){
+    currentUser=session.user;
+    if(!APP_INICIADA){ await loadProfile(); enterApp(); APP_INICIADA=true; }
+  } else {
+    APP_INICIADA=false; currentUser=null; currentProfile=null;
+    document.getElementById('login').style.display='flex';
+    document.getElementById('app').style.display='none';
+  }
 });
 async function loadProfile(){
   const {data}=await sb.from('perfiles').select('*').eq('id',currentUser.id).single();
