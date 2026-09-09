@@ -449,6 +449,17 @@ select:disabled{opacity:.5}
 .fil-apl-sub{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis;opacity:.75}
 .fil-apl-sub i{color:var(--muted)}
+
+/* ---- modal de producto ---- */
+.prod-sec{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:var(--amber);
+  margin:16px 0 8px;padding-top:10px;border-top:1px solid var(--line)}
+.prod-calc{display:flex;justify-content:space-between;align-items:center;
+  padding:5px 0;font-size:13px;color:var(--muted)}
+.prod-calc b{color:var(--text);font-weight:600}
+.prod-calc.total{border-top:1px solid var(--line);margin-top:6px;padding-top:10px}
+.prod-calc.total b{font-family:'Barlow Condensed';font-size:22px;color:var(--amber)}
+.prod-tag{font-size:10px;color:var(--muted);border:1px solid var(--line);
+  padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:400}
 </style>
 </head>
 <body>
@@ -656,36 +667,151 @@ PAGES.productos=async ()=>{
   </tr>`).join('');
   content.innerHTML=tableShell('Catálogo',['Código','Nombre','Tipo','Precio','Stock','']  ,rows);
 };
-function formProducto(p){
-  p=p||{};
-  openModal(p.id?'Editar producto':'Nuevo producto',`
-    <div class="field"><label>Tipo</label><select id="f-tipo"><option value="producto"${p.tipo==='producto'?' selected':''}>Producto</option><option value="servicio"${p.tipo==='servicio'?' selected':''}>Servicio</option></select></div>
+let PROD_ALIC = null;      // alícuotas de IVA, se cachean
+let PROD_MARGEN = 45;      // margen general vigente, leído de la base
+let PROD_ACTUAL = null;
+
+async function formProducto(p){
+  p = p || {};
+  PROD_ACTUAL = p;
+  if(!PROD_ALIC){
+    const [{data:a},{data:c}] = await Promise.all([
+      sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id'),
+      sb.from('configuracion').select('valor').eq('clave','margen_general').single()
+    ]);
+    PROD_ALIC = a||[];
+    PROD_MARGEN = Number(c && c.valor) || 45;
+  }
+  const esServicio = p.tipo === 'servicio';
+  const ivaCompra = Number(p.ultima_alicuota_iva) > 0 ? Number(p.ultima_alicuota_iva) : 21;
+
+  openModal(p.id ? 'Editar producto' : 'Nuevo producto', `
     <div class="row2">
-      <div class="field"><label>Código</label><input id="f-codigo" value="${p.codigo||''}"></div>
+      <div class="field"><label>Tipo</label>
+        <select id="f-tipo" onchange="prodPreview()">
+          <option value="producto" ${p.tipo!=='servicio'?'selected':''}>Producto</option>
+          <option value="servicio" ${esServicio?'selected':''}>Servicio</option>
+        </select></div>
       <div class="field"><label>Unidad</label><input id="f-unidad" value="${p.unidad||'unidad'}"></div>
     </div>
-    <div class="field"><label>Nombre</label><input id="f-nombre" value="${p.nombre||''}"></div>
+    <div class="field"><label>Código *</label><input id="f-codigo" value="${p.codigo||''}"></div>
+    <div class="field"><label>Nombre *</label><input id="f-nombre" value="${(p.nombre||'').replace(/"/g,'&quot;')}"></div>
+
+    <div class="prod-sec">Costo</div>
     <div class="row2">
-      <div class="field"><label>Precio venta</label><input id="f-precio" type="number" value="${p.precio_venta||0}"></div>
-      <div class="field"><label>Costo</label><input id="f-costo" type="number" value="${p.costo||0}"></div>
+      <div class="field" style="margin:0"><label>Costo neto (sin IVA)</label>
+        <input id="f-costo" type="number" min="0" step="0.01" value="${p.costo||0}" oninput="prodPreview()"></div>
+      <div class="field" style="margin:0"><label>IVA de compra</label>
+        <select id="f-iva" onchange="prodPreview()">
+          ${PROD_ALIC.map(a=>`<option value="${a.porcentaje}" ${Number(a.porcentaje)===ivaCompra?'selected':''}>${a.nombre}</option>`).join('')}
+        </select></div>
     </div>
+    <div class="prod-calc"><span>Costo final (con IVA)</span><b id="f-costofinal">—</b></div>
+
+    <div class="prod-sec">Precio de venta</div>
+    <div class="row2" style="align-items:end">
+      <div class="field" style="margin:0"><label>Margen Lubrimax %</label>
+        <input id="f-margen" type="number" min="0" max="500" step="0.01"
+               value="${p.margen_personalizado!=null?p.margen_personalizado:''}"
+               placeholder="${PROD_MARGEN} (general)" oninput="prodPreview()"></div>
+      <div class="field" style="margin:0">
+        <button class="btn btn-ghost btn-sm" style="width:100%" onclick="prodMargenGeneral()">Usar margen general</button></div>
+    </div>
+    <div class="prod-calc"><span>Margen aplicado</span><b id="f-margentag">—</b></div>
+    <div class="prod-calc"><span>Precio neto (sin IVA)</span><b id="f-pneto">—</b></div>
+    <div class="prod-calc total"><span>PRECIO DE VENTA</span><b id="f-pfinal">—</b></div>
+
+    <div class="prod-sec">Referencia</div>
+    <div class="field" style="margin:0"><label>Precio lista Wega</label>
+      <input id="f-wega" type="number" min="0" step="0.01"
+             value="${p.precio_lista_wega!=null?p.precio_lista_wega:''}" oninput="prodPreview()"></div>
+    <div class="prod-calc"><span>Comparación</span><b id="f-difwega">—</b></div>
+
+    <div class="prod-sec">Stock</div>
     <div class="row2">
-      <div class="field"><label>Stock</label><input id="f-stock" type="number" value="${p.stock||0}"></div>
-      <div class="field"><label>Stock mínimo</label><input id="f-min" type="number" value="${p.stock_minimo||0}"></div>
+      <div class="field" style="margin:0"><label>Stock actual</label>
+        <input value="${p.id ? (p.stock||0) : 0}" disabled
+               title="El stock se ajusta desde el módulo Stock, o entra por una compra"></div>
+      <div class="field" style="margin:0"><label>Stock mínimo</label>
+        <input id="f-min" type="number" min="0" step="0.01" value="${p.stock_minimo||0}"></div>
     </div>
-  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveProducto(${p.id||'null'})">Guardar</button>`);
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">
+      El stock no se edita acá: entra por Compras o se corrige desde Stock, que deja registro.</div>
+    <div id="f-msg"></div>
+  `, `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn" id="f-ok" onclick="saveProducto(${p.id||'null'})">Guardar</button>`);
+  prodPreview();
 }
+
+function prodMargenGeneral(){
+  const m = $('f-margen'); if(m){ m.value = ''; prodPreview(); }
+}
+
+// Vista previa. El valor definitivo siempre lo calcula guardar_producto.
+function prodPreview(){
+  const costo = Number($('f-costo') ? $('f-costo').value : 0) || 0;
+  const iva   = Number($('f-iva')   ? $('f-iva').value   : 21) || 0;
+  const mTxt  = $('f-margen') ? $('f-margen').value.trim() : '';
+  const propio = mTxt !== '';
+  const margen = propio ? (Number(mTxt)||0) : PROD_MARGEN;
+  const ivaVenta = 21;
+
+  const costoFinal = Math.round(costo * (1 + iva/100) * 100) / 100;
+  const pFinal     = Math.round(costoFinal * (1 + margen/100) * 100) / 100;
+  const pNeto      = Math.round(pFinal / (1 + ivaVenta/100) * 100) / 100;
+
+  const set=(id,v)=>{ const e=$(id); if(e) e.innerHTML=v; };
+  set('f-costofinal', money(costoFinal));
+  set('f-margentag', `${margen}% <span class="prod-tag">${propio?'particular':'general'}</span>`);
+  set('f-pneto', money(pNeto));
+  set('f-pfinal', money(pFinal));
+
+  const wega = Number($('f-wega') ? $('f-wega').value : 0) || 0;
+  if(wega > 0){
+    const dif = pFinal - wega, pct = dif/wega*100;
+    set('f-difwega', `Lista Wega ${money(wega)} · Lubrimax <b style="color:${dif<0?'var(--danger)':'var(--ok)'}">${dif<0?'':'+'}${pct.toFixed(2)}%</b>`);
+  } else {
+    set('f-difwega', '<span style="color:var(--muted)">Lista Wega: —</span>');
+  }
+}
+
 async function saveProducto(id){
-  const payload={
-    tipo:$('f-tipo').value, codigo:$('f-codigo').value.trim(), unidad:$('f-unidad').value.trim(),
-    nombre:$('f-nombre').value.trim(), precio_venta:+$('f-precio').value, costo:+$('f-costo').value,
-    stock:+$('f-stock').value, stock_minimo:+$('f-min').value
-  };
-  if(!payload.nombre){alert('El nombre es obligatorio');return;}
-  const q = id? sb.from('productos').update(payload).eq('id',id) : sb.from('productos').insert(payload);
-  const {error}=await q;
-  if(error){alert(error.message);return;}
-  closeModal(); PAGES.productos();
+  const m=$('f-msg');
+  const set=(t,tp)=>{ m.innerHTML=`<div class="msg ${tp}">${t}</div>`; };
+  const codigo=$('f-codigo').value.trim();
+  const nombre=$('f-nombre').value.trim();
+  if(!codigo){ set('El código es obligatorio.','error'); return; }
+  if(!nombre){ set('El nombre es obligatorio.','error'); return; }
+  const mTxt=$('f-margen').value.trim();
+
+  const btn=$('f-ok'); if(btn) btn.disabled=true;
+  set('Guardando…','ok');
+  // Sólo se mandan los editables. costo_final, precio_neto, precio_final y
+  // precio_venta los calcula la RPC; el stock no se manda nunca.
+  const {data,error}=await sb.rpc('guardar_producto',{
+    p_id: id,
+    p_codigo: codigo,
+    p_nombre: nombre,
+    p_tipo: $('f-tipo').value,
+    p_unidad: $('f-unidad').value.trim()||'unidad',
+    p_costo: Number($('f-costo').value)||0,
+    p_alicuota_iva: Number($('f-iva').value)||21,
+    p_margen_personalizado: mTxt===''? null : Number(mTxt),
+    p_stock_minimo: Number($('f-min').value)||0,
+    p_precio_lista_wega: $('f-wega').value.trim()===''? null : Number($('f-wega').value)
+  });
+  if(error){
+    if(btn) btn.disabled=false;
+    let t=error.message||'Error';
+    if(/Ya existe otro producto/i.test(t)) t='Ese código ya está usado por otro producto.';
+    else if(/No autorizado/i.test(t))      t='Sólo un administrador puede crear o editar productos.';
+    else if(/Alícuota/i.test(t))           t='La alícuota de IVA no es válida.';
+    else if(/margen/i.test(t))             t='El margen debe estar entre 0 y 500.';
+    else if(/costo/i.test(t))              t='El costo no puede ser negativo.';
+    set(t,'error'); return;
+  }
+  closeModal();
+  PAGES.productos();
 }
 
 // ----- STOCK -----
