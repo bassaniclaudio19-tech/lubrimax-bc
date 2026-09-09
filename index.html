@@ -1708,7 +1708,9 @@ async function cmpGuardar(accion){
   const {data:compraIns,error:e1}=await sb.from('compras').insert(cab).select('id').single();
   if(e1){
     btns.forEach(b=>b.disabled=false);
-    if(e1.code==='23505') return setMsg('Ya existe una compra con ese número para este proveedor.','error');
+    // La base sólo bloquea si hay otra compra VIGENTE con ese proveedor+número.
+    // Las anuladas no ocupan el número, así que una factura anulada se puede recargar.
+    if(e1.code==='23505') return setMsg('Ya existe una compra <b>vigente</b> con ese número para este proveedor. Si la anterior fue anulada, este número queda libre; revisá el listado.','error');
     return setMsg('Error al guardar la compra: '+e1.message,'error');
   }
   const compra_id=compraIns.id;
