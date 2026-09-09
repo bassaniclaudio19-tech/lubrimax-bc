@@ -439,6 +439,16 @@ select:disabled{opacity:.5}
   font-family:'Barlow Condensed';font-size:22px;font-weight:700}
 .pre-tt.total b{color:var(--amber)}
 @media(max-width:860px){ .pre-cond{grid-template-columns:1fr 1fr} }
+
+/* La columna principal muestra la APLICACIÓN del catálogo.
+   La descripción comercial del producto queda debajo, como dato secundario:
+   puede mencionar otra versión y no debe confundirse con la aplicación. */
+.fil-apl{overflow:hidden}
+.fil-apl-main{font-size:12px;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.fil-apl-sub{font-size:10px;color:var(--muted);margin-top:2px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;opacity:.75}
+.fil-apl-sub i{color:var(--muted)}
 </style>
 </head>
 <body>
@@ -1964,7 +1974,9 @@ async function preFiltrosVehiculo(){
     return `<tr class="${noSirve?'fil-sinprod':''}">
       <td class="fil-cat">${r.tipo}</td>
       <td><b style="color:var(--amber)">${r.codigo}</b></td>
-      <td class="fil-desc" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">${corto(r.descripcion,55)}</td>
+      <td class="fil-apl" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">
+        <div class="fil-apl-main">${r.motor||'—'}${r.anio&&r.anio!=='—'?' · '+r.anio:''}</div>
+        <div class="fil-apl-sub">${corto(r.descripcion,52)}</div></td>
       <td class="cmp-num">${r.precio!=null?money(r.precio):'—'}</td>
       <td>${estadoComercial(r)}</td>
       <td style="text-align:center">${noSirve
@@ -1975,7 +1987,7 @@ async function preFiltrosVehiculo(){
     </tr>`;
   };
   const tabla=(f)=>`<div class="fil-wrap"><table class="fil-tabla">
-      <thead><tr><th>Categoría</th><th>Código</th><th>Producto Lubrimax</th>
+      <thead><tr><th>Categoría</th><th>Código</th><th>Aplicación</th>
         <th class="cmp-num">Precio</th><th>Disponibilidad</th><th style="text-align:center">Agregar</th></tr></thead>
       <tbody>${f.map(fila).join('')}</tbody></table></div>`;
 
@@ -2578,9 +2590,11 @@ async function trbFiltrosVehiculo(vehiculo_id){
       <td class="fil-cat">${mostrarCat?r.tipo:''}</td>
       <td><b style="color:var(--amber)">${r.codigo}</b>
         ${alt?'<span class="trb-alt">alternativa</span>':''}</td>
-      <td class="fil-desc" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">${
-        sinProd ? '<i style="color:var(--muted)">sin producto en el catálogo</i>'
-                : corto(r.descripcion, 55)}</td>
+      <td class="fil-apl" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">
+        <div class="fil-apl-main">${r.motor||'—'}${r.anio&&r.anio!=='—'?' · '+r.anio:''}</div>
+        <div class="fil-apl-sub">${sinProd
+            ? '<i>sin producto en el catálogo Lubrimax</i>'
+            : corto(r.descripcion, 52)}</div></td>
       <td class="cmp-num">${r.precio!=null?money(r.precio):'—'}</td>
       <td>${estadoComercial(r)}</td>
       <td style="text-align:center">
@@ -2594,7 +2608,7 @@ async function trbFiltrosVehiculo(vehiculo_id){
   const tabla=(filas, preseleccionable)=>{
     let cat=null;
     return `<div class="fil-wrap"><table class="fil-tabla">
-      <thead><tr><th>Categoría</th><th>Código</th><th>Producto Lubrimax</th>
+      <thead><tr><th>Categoría</th><th>Código</th><th>Aplicación</th>
         <th class="cmp-num">Precio</th><th>Disponibilidad</th><th style="text-align:center">Agregar</th></tr></thead>
       <tbody>${filas.map(r=>{
         const nueva = r.tipo!==cat; cat=r.tipo;
