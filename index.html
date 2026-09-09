@@ -426,6 +426,19 @@ select:disabled{opacity:.5}
   .fil-desc{white-space:normal}
   .fil-tabla th:nth-child(n),.fil-tabla td:nth-child(n){width:auto}
 }
+
+/* ---- Presupuestos ---- */
+.pre-cond{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:12px}
+.pre-inp{width:100%;padding:5px 8px;background:var(--graphite);border:1px solid var(--line);
+  border-radius:6px;color:var(--text);font-size:12px;text-align:right}
+.pre-inp:focus{outline:none;border-color:var(--amber)}
+.pre-tot{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+  max-width:380px;margin-left:auto}
+.pre-tt{display:flex;justify-content:space-between;padding:4px 0;font-size:13px}
+.pre-tt.total{border-top:1px solid var(--line);margin-top:6px;padding-top:10px;
+  font-family:'Barlow Condensed';font-size:22px;font-weight:700}
+.pre-tt.total b{color:var(--amber)}
+@media(max-width:860px){ .pre-cond{grid-template-columns:1fr 1fr} }
 </style>
 </head>
 <body>
@@ -1682,11 +1695,532 @@ async function cmpAnular(id){
   cmpVer(id);
 }
 
-PAGES.presupuestos=async ()=>{
-  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nuevo presupuesto (próximo)</button>`;
-  await simpleList('presupuestos','Presupuestos',['Fecha','Estado','Total',''],
-    p=>`<tr><td>${p.fecha}</td><td><span class="tag warn">${p.estado}</span></td><td>${money(p.total)}</td><td></td></tr>`);
+// ----- PRESUPUESTOS -----
+const PRE_ESTADOS=[
+  {v:'borrador',  t:'Borrador',   c:'warn'},
+  {v:'enviado',   t:'Enviado',    c:'warn'},
+  {v:'aprobado',  t:'Aprobado',   c:'ok'},
+  {v:'rechazado', t:'Rechazado',  c:'pend'},
+  {v:'vencido',   t:'Vencido',    c:'pend'},
+  {v:'cancelado', t:'Cancelado',  c:'pend'},
+  {v:'convertido',t:'Convertido', c:'ok'}
+];
+// Misma matriz que cambiar_estado_presupuesto. El backend es la autoridad;
+// esto sólo evita ofrecer acciones que van a fallar.
+const PRE_TRANSICIONES={
+  borrador:['enviado','aprobado','rechazado','cancelado'],
+  enviado:['aprobado','rechazado','vencido','cancelado'],
+  aprobado:['convertido','cancelado'],
+  rechazado:[], vencido:[], cancelado:[], convertido:[]
 };
+const preEst=(v)=>{const e=PRE_ESTADOS.find(x=>x.v===v)||{t:v||'—',c:'warn'};
+  return `<span class="tag ${e.c}">${e.t}</span>`;};
+
+let PRE_FILTRO='', PRE_NUEVO=null, PRE_CAT=null;
+
+PAGES.presupuestos=async ()=>{
+  loading();
+  topActions.innerHTML=`<button class="btn" onclick="preNuevo()">+ Nuevo presupuesto</button>`;
+  content.innerHTML=`
+    <div class="cli-toolbar">
+      <select id="pre-f" class="cli-search" style="max-width:260px" onchange="preRender(this.value)">
+        <option value="">Todos los estados</option>
+        <option value="abiertos">Solo abiertos</option>
+        ${PRE_ESTADOS.map(e=>`<option value="${e.v}">${e.t}</option>`).join('')}
+      </select>
+    </div>
+    <div id="pre-list"><div class="loading">Cargando…</div></div>`;
+  $('pre-f').value=PRE_FILTRO;
+  await preRender(PRE_FILTRO);
+};
+
+async function preRender(f){
+  PRE_FILTRO=f||'';
+  const box=$('pre-list'); if(!box) return;
+  let q=sb.from('presupuestos')
+    .select('id,fecha,estado,total,validez_dias,cliente_id,vehiculo_id')
+    .order('creado_en',{ascending:false});
+  if(PRE_FILTRO==='abiertos') q=q.in('estado',['borrador','enviado','aprobado']);
+  else if(PRE_FILTRO) q=q.eq('estado',PRE_FILTRO);
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){
+    box.innerHTML='<div class="panel"><div class="empty">No hay presupuestos'
+      +(PRE_FILTRO?' con ese estado':' cargados')+'.</div></div>'; return; }
+
+  const cid=[...new Set(data.map(p=>p.cliente_id).filter(Boolean))];
+  const vid=[...new Set(data.map(p=>p.vehiculo_id).filter(Boolean))];
+  let cli={}, veh={};
+  if(cid.length){ const {data:c}=await sb.from('clientes').select('id,nombre').in('id',cid);
+    (c||[]).forEach(x=>cli[x.id]=x.nombre); }
+  if(vid.length){ const {data:v}=await sb.from('vehiculos').select('id,patente,marca,modelo,version').in('id',vid);
+    (v||[]).forEach(x=>veh[x.id]=x); }
+
+  const rows=data.map(p=>{
+    const v=veh[p.vehiculo_id];
+    const vence = p.fecha ? new Date(new Date(p.fecha).getTime()+(p.validez_dias||15)*86400000) : null;
+    const vencido = vence && vence < new Date() && ['borrador','enviado'].includes(p.estado);
+    return `<tr style="cursor:pointer" onclick="preFicha(${p.id})">
+      <td><b>#${p.id}</b></td>
+      <td>${p.fecha}</td>
+      <td>${cli[p.cliente_id]||'—'}</td>
+      <td>${v?`<b style="color:var(--amber)">${v.patente||''}</b> ${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')}`:'—'}</td>
+      <td>${preEst(p.estado)}</td>
+      <td>${vence?vence.toLocaleDateString('es-AR')+(vencido?' <span class="tag pend">vencido</span>':''):'—'}</td>
+      <td class="cmp-num" style="font-weight:600">${money(p.total)}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML=tableShell(`Presupuestos (${data.length})`,
+    ['N°','Fecha','Cliente','Vehículo','Estado','Vence','Total'],rows);
+}
+
+// ══════════ NUEVO PRESUPUESTO ══════════
+async function preNuevo(cliente_id, vehiculo_id){
+  loading();
+  PRE_NUEVO={cliente_id:null, vehiculo_id:null, items:[], descuento:0,
+             comprobante:null, alicuota:null, validez:15, notas:''};
+  const [{data:cls},{data:cmp},{data:ali}]=await Promise.all([
+    sb.rpc('buscar_clientes',{q:null,p_solo_activos:true}),
+    sb.from('tipos_comprobante').select('id,nombre,discrimina_iva').eq('activo',true).order('id'),
+    sb.from('alicuotas_iva').select('id,nombre,porcentaje').eq('activo',true).order('id')
+  ]);
+  PRE_CAT={comprobantes:cmp||[], alicuotas:ali||[]};
+  const a21=(ali||[]).find(x=>Number(x.porcentaje)===21);
+
+  pageTitle.textContent='Nuevo presupuesto';
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('presupuestos')">← Presupuestos</button>`;
+  content.innerHTML=`
+    <div id="pre-msg"></div>
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Cliente y vehículo</h3></div>
+      <div style="padding:16px 20px">
+        <div class="row2">
+          <div class="field" style="margin:0"><label>Cliente *</label>
+            <select id="pn-cli" onchange="preSetCliente(this.value)">
+              <option value="">Elegí un cliente…</option>
+              ${(cls||[]).map(c=>`<option value="${c.id}" ${cliente_id==c.id?'selected':''}>${c.nombre}</option>`).join('')}
+            </select></div>
+          <div class="field" style="margin:0"><label>Vehículo</label>
+            <select id="pn-veh" onchange="preSetVehiculo(this.value)" disabled>
+              <option value="">Elegí primero el cliente</option></select></div>
+        </div>
+        <div id="pn-vehdatos" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>Ítems</h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="preAddServicio()">+ Servicio</button>
+          <button class="btn btn-ghost btn-sm" onclick="preAddProducto()">+ Producto</button>
+          <button class="btn btn-sm" id="pn-filtros" onclick="preFiltrosVehiculo()" disabled>Ver filtros de este vehículo</button>
+        </div></div>
+      <div id="pn-items"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Condiciones y total</h3></div>
+      <div style="padding:16px 20px">
+        <div class="pre-cond">
+          <div class="field" style="margin:0"><label>Comprobante</label>
+            <select id="pn-comp" onchange="preTotales()">
+              <option value="">Mostrador (sin discriminar)</option>
+              ${(cmp||[]).filter(c=>c.nombre!=='Sin comprobante')
+                .map(c=>`<option value="${c.id}" data-d="${c.discrimina_iva}">${c.nombre}</option>`).join('')}
+            </select></div>
+          <div class="field" style="margin:0"><label>Alícuota IVA</label>
+            <select id="pn-alic" onchange="preTotales()">
+              ${(ali||[]).map(x=>`<option value="${x.id}" data-p="${x.porcentaje}" ${a21&&x.id===a21.id?'selected':''}>${x.nombre}</option>`).join('')}
+            </select></div>
+          <div class="field" style="margin:0"><label>Descuento %</label>
+            <input id="pn-desc" type="number" min="0" max="100" step="0.01" value="0" oninput="preTotales()"></div>
+          <div class="field" style="margin:0"><label>Validez (días)</label>
+            <input id="pn-val" type="number" min="1" value="15"></div>
+        </div>
+        <div class="field"><label>Observaciones</label><input id="pn-notas"></div>
+        <div id="pn-tot" class="pre-tot"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px">
+          <button class="btn" id="pn-ok" onclick="preGuardar()">Guardar presupuesto</button>
+        </div>
+      </div>
+    </div>`;
+  preItems(); preTotales();
+  if(cliente_id){ await preSetCliente(cliente_id); if(vehiculo_id) await preSetVehiculo(vehiculo_id); }
+}
+
+async function preSetCliente(id){
+  PRE_NUEVO.cliente_id=Number(id)||null;
+  PRE_NUEVO.vehiculo_id=null;
+  const s=$('pn-veh'); const d=$('pn-vehdatos');
+  d.innerHTML=''; $('pn-filtros').disabled=true;
+  if(!PRE_NUEVO.cliente_id){ s.innerHTML='<option value="">Elegí primero el cliente</option>'; s.disabled=true; return; }
+  s.disabled=true; s.innerHTML='<option>Cargando…</option>';
+  const {data}=await sb.rpc('cliente_vehiculos',{p_cliente_id:PRE_NUEVO.cliente_id});
+  window._preVehs={}; (data||[]).forEach(v=>window._preVehs[v.id]=v);
+  if(!data||!data.length){
+    s.innerHTML='<option value="">Sin vehículos</option>'; s.disabled=true;
+    d.innerHTML=`<div class="msg error" style="margin:0">Este cliente no tiene vehículos.
+      Cargalo desde su ficha y volvé.
+      <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="cliFicha(${PRE_NUEVO.cliente_id})">Ir a la ficha</button></div>`;
+    return; }
+  s.innerHTML='<option value="">Elegí un vehículo…</option>'+
+    data.map(v=>`<option value="${v.id}">${v.patente||'sin patente'} · ${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')}</option>`).join('');
+  s.disabled=false;
+  if(data.length===1){ s.value=data[0].id; await preSetVehiculo(data[0].id); }   // uno solo: se elige solo
+}
+
+async function preSetVehiculo(id){
+  PRE_NUEVO.vehiculo_id=Number(id)||null;
+  const d=$('pn-vehdatos'); const v=(window._preVehs||{})[id];
+  $('pn-filtros').disabled=!PRE_NUEVO.vehiculo_id;
+  if(!v){ d.innerHTML=''; return; }
+  d.innerHTML=`<div class="trb-veh">
+      <div class="trb-veh-k">Vehículo</div>
+      <div class="trb-veh-v">${[v.marca,v.modelo].filter(Boolean).join(' ')}
+        ${v.version?`<span style="color:var(--amber)"> · ${v.version}</span>`:''}</div>
+      <div class="caj-sub">${v.patente?'<b>'+v.patente+'</b> · ':''}${v.anio||'—'}
+        · ${v.km_actual?Number(v.km_actual).toLocaleString('es-AR')+' km':'km no registrado'}
+        ${v.catalogo_txt?' · <span style="color:var(--ok)">catálogo: '+v.catalogo_txt+'</span>':''}</div>
+    </div>`;
+}
+
+// ---------- ítems ----------
+function preItems(){
+  const box=$('pn-items'); if(!box) return;
+  const it=PRE_NUEVO.items;
+  if(!it.length){ box.innerHTML='<div class="empty" style="padding:24px">Todavía no agregaste ítems.</div>'; return; }
+  box.innerHTML=`<table class="cmp-lines"><thead><tr>
+      <th>Descripción</th><th style="width:11%">Tipo</th><th style="width:10%" class="cmp-num">Cant.</th>
+      <th style="width:16%" class="cmp-num">Precio unit.</th><th style="width:15%" class="cmp-num">Subtotal</th>
+      <th style="width:5%"></th></tr></thead><tbody>
+    ${it.map((l,i)=>`<tr>
+      <td>${l.codigo?`<b style="color:var(--amber)">${l.codigo}</b> · `:''}${l.descripcion||''}
+        ${l.estado==='sin_stock'?' <span class="tag warn">sin stock</span>':''}</td>
+      <td>${l.es_servicio?'<span class="tag warn">Servicio</span>':'<span class="tag ok">Producto</span>'}</td>
+      <td class="cmp-num"><input type="number" min="0.01" step="0.01" value="${l.cantidad}"
+            class="pre-inp" oninput="preSetCant(${i},this.value)"></td>
+      <td class="cmp-num">${l.es_servicio
+          ? `<input type="number" min="0" step="0.01" value="${l.precio}" class="pre-inp"
+               oninput="preSetPrecio(${i},this.value)" title="Editable: el servicio puede variar">`
+          : `<span title="Precio de lista, no editable">${money(l.precio)}</span>`}</td>
+      <td class="cmp-num" style="font-weight:600">${money(l.cantidad*l.precio)}</td>
+      <td><button class="cmp-delrow" onclick="preDel(${i})">×</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+function preSetCant(i,v){ PRE_NUEVO.items[i].cantidad=Number(v)||0; preTotales(); preItems(); }
+function preSetPrecio(i,v){ PRE_NUEVO.items[i].precio=Number(v)||0; preTotales(); }
+function preDel(i){ PRE_NUEVO.items.splice(i,1); preItems(); preTotales(); }
+
+// ---------- totales (vista previa; el backend recalcula al guardar) ----------
+function preTotales(){
+  const box=$('pn-tot'); if(!box) return;
+  const sub=PRE_NUEVO.items.reduce((s,l)=>s+(Number(l.cantidad)||0)*(Number(l.precio)||0),0);
+  const pct=Number($('pn-desc')?$('pn-desc').value:0)||0;
+  const desc=Math.round(sub*pct)/100;
+  const base=sub-desc;
+  const cs=$('pn-comp'), as=$('pn-alic');
+  const comp=cs&&cs.value?cs.value:null;
+  const discrimina=cs&&cs.selectedOptions[0]?cs.selectedOptions[0].dataset.d==='true':false;
+  const alic=as&&as.selectedOptions[0]?Number(as.selectedOptions[0].dataset.p)||0:0;
+  let neto=base, iva=0, total=base;
+  if(comp && alic>0){
+    if(discrimina){ neto=base; iva=Math.round(neto*alic)/100; total=neto+iva; }
+    else { total=base; neto=Math.round(total/(1+alic/100)*100)/100; iva=total-neto; }
+  }
+  box.innerHTML=`
+    <div class="pre-tt"><span>Subtotal</span><b>${money(sub)}</b></div>
+    ${pct>0?`<div class="pre-tt"><span>Descuento ${pct}%</span><b style="color:var(--danger)">−${money(desc)}</b></div>`:''}
+    ${comp&&alic>0?`<div class="pre-tt"><span>Neto</span><b>${money(neto)}</b></div>
+      <div class="pre-tt"><span>IVA ${alic}%</span><b>${money(iva)}</b></div>`:''}
+    <div class="pre-tt total"><span>TOTAL</span><b>${money(total)}</b></div>
+    <div style="font-size:11px;color:var(--muted);text-align:right;margin-top:6px">
+      Vista previa. El importe definitivo lo calcula el servidor al guardar.</div>`;
+}
+
+// ---------- filtros del vehículo ----------
+async function preFiltrosVehiculo(){
+  if(!PRE_NUEVO.vehiculo_id) return;
+  const {data,error}=await sb.rpc('filtros_sugeridos_vehiculo',{p_vehiculo_id:PRE_NUEVO.vehiculo_id});
+  if(error){ alert(error.message); return; }
+  if(!data||!data.length){
+    openModal('Filtros para este vehículo',
+      '<div class="empty">Este vehículo no tiene filtros en el catálogo.</div>',
+      `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`); return; }
+  const exactas=data.filter(r=>r.es_exacta), otras=data.filter(r=>!r.es_exacta);
+  const ya={}; PRE_NUEVO.items.forEach(l=>{ if(l.producto_id) ya[l.producto_id]=true; });
+
+  const fila=(r)=>{
+    const noSirve = !r.producto_id || Number(r.precio||0)<=0;   // sin producto o sin precio: no cobrable
+    return `<tr class="${noSirve?'fil-sinprod':''}">
+      <td class="fil-cat">${r.tipo}</td>
+      <td><b style="color:var(--amber)">${r.codigo}</b></td>
+      <td class="fil-desc" title="${(r.descripcion||'').replace(/"/g,'&quot;')}">${corto(r.descripcion,55)}</td>
+      <td class="cmp-num">${r.precio!=null?money(r.precio):'—'}</td>
+      <td>${estadoComercial(r)}</td>
+      <td style="text-align:center">${noSirve
+        ? '<span style="color:var(--muted);font-size:11px">no cobrable</span>'
+        : (ya[r.producto_id]
+            ? '<span class="tag ok">agregado</span>'
+            : `<button class="btn btn-sm" onclick='preAddFiltro(${JSON.stringify(r).replace(/'/g,"&#39;")},this)'>Agregar</button>`)}</td>
+    </tr>`;
+  };
+  const tabla=(f)=>`<div class="fil-wrap"><table class="fil-tabla">
+      <thead><tr><th>Categoría</th><th>Código</th><th>Producto Lubrimax</th>
+        <th class="cmp-num">Precio</th><th>Disponibilidad</th><th style="text-align:center">Agregar</th></tr></thead>
+      <tbody>${f.map(fila).join('')}</tbody></table></div>`;
+
+  let html='';
+  if(exactas.length){
+    const e=exactas[0];
+    html+=`<div class="trb-veh"><div class="trb-veh-k">Aplicación exacta del vehículo</div>
+      <div class="trb-veh-v">${e.motor} · ${e.anio} <span class="tag ok">versión exacta</span></div></div>`
+      + tabla(exactas);
+  } else {
+    html+='<div class="msg error">No se identificó la versión exacta. Revisá la ficha del vehículo.</div>';
+  }
+  if(otras.length){
+    const g={}; otras.forEach(r=>{ const k=r.motor+' · '+r.anio; (g[k]=g[k]||[]).push(r); });
+    html+=`<div class="fil-otras"><button class="fil-toggle" onclick="filToggleOtras()">
+        <span id="fil-flecha">▸</span> Ver otras versiones del mismo modelo (${Object.keys(g).length})</button>
+      <div id="fil-otras-body" style="display:none">
+        ${Object.entries(g).map(([m,arr])=>`<div class="trb-motor">${m}</div>${tabla(arr)}`).join('')}
+      </div></div>`;
+  }
+  openModal('Filtros para este vehículo', html,
+    `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`, 'xl');
+}
+
+function preAddFiltro(r, btn){
+  if(!r.producto_id || Number(r.precio||0)<=0) return;
+  if(PRE_NUEVO.items.some(l=>l.producto_id===r.producto_id)) return;
+  PRE_NUEVO.items.push({producto_id:r.producto_id, codigo:r.codigo,
+    descripcion:r.descripcion||r.codigo, cantidad:1,
+    precio:Number(r.precio), es_servicio:false, estado:r.estado_comercial});
+  preItems(); preTotales();
+  if(btn) btn.outerHTML='<span class="tag ok">agregado</span>';
+}
+
+// ---------- servicio ----------
+async function preAddServicio(){
+  const {data}=await sb.from('productos').select('id,codigo,nombre,categoria,precio_venta')
+    .eq('tipo','servicio').eq('activo',true).order('categoria').order('nombre');
+  const g={}; (data||[]).forEach(s=>{ (g[s.categoria||'Otros']=g[s.categoria||'Otros']||[]).push(s); });
+  openModal('Agregar servicio',`
+    <div class="field"><label>Servicio</label>
+      <select id="ps-id" onchange="preSrvPrecio()">
+        ${Object.entries(g).map(([c,arr])=>`<optgroup label="${c}">
+          ${arr.map(s=>`<option value="${s.id}" data-p="${s.precio_venta||0}"
+             data-n="${(s.nombre||'').replace(/"/g,'&quot;')}">${s.nombre}</option>`).join('')}
+        </optgroup>`).join('')}
+      </select></div>
+    <div class="row2">
+      <div class="field"><label>Cantidad</label><input id="ps-cant" type="number" min="0.01" step="0.01" value="1"></div>
+      <div class="field"><label>Precio *</label><input id="ps-precio" type="number" min="0" step="0.01"></div>
+    </div>
+    <div id="ps-nota" style="font-size:11px;color:var(--muted)"></div>
+    <div id="ps-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="preSrvGuardar()">Agregar</button>`);
+  preSrvPrecio();
+}
+function preSrvPrecio(){
+  const s=$('ps-id'); if(!s||!s.selectedOptions[0]) return;
+  const p=Number(s.selectedOptions[0].dataset.p)||0;
+  const inp=$('ps-precio'), nota=$('ps-nota');
+  inp.value = p>0 ? p : '';
+  nota.textContent = p>0
+    ? 'Precio base sugerido. Podés cambiarlo si el trabajo lleva más tiempo o complejidad.'
+    : 'Este servicio no tiene precio base cargado: indicá el importe.';
+}
+function preSrvGuardar(){
+  const s=$('ps-id'); const precio=Number($('ps-precio').value)||0;
+  const cant=Number($('ps-cant').value)||0;
+  if(precio<=0){ $('ps-msg').innerHTML='<div class="msg error">Indicá un precio mayor a cero.</div>'; return; }
+  if(cant<=0){ $('ps-msg').innerHTML='<div class="msg error">La cantidad debe ser mayor a cero.</div>'; return; }
+  PRE_NUEVO.items.push({producto_id:Number(s.value), codigo:null,
+    descripcion:s.selectedOptions[0].dataset.n, cantidad:cant, precio, es_servicio:true});
+  closeModal(); preItems(); preTotales();
+}
+
+// ---------- producto suelto ----------
+function preAddProducto(){
+  openModal('Agregar producto',`
+    <div class="field"><label>Buscar producto</label>
+      <div class="cmp-prodwrap">
+        <input id="pp-q" placeholder="Código o nombre…" autocomplete="off" oninput="preBuscarProd(this.value)">
+        <div class="cmp-prodhits" id="pp-hits"></div>
+      </div></div>
+    <div id="pp-sel" style="font-size:13px;color:var(--muted);margin-bottom:10px">Ningún producto elegido</div>
+    <div class="field"><label>Cantidad</label><input id="pp-cant" type="number" min="0.01" step="0.01" value="1"></div>
+    <div style="font-size:11px;color:var(--muted)">El precio sale del catálogo y no se edita.</div>
+    <div id="pp-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="preProdGuardar()">Agregar</button>`);
+  window._preProd=null;
+}
+let PRE_T=null;
+function preBuscarProd(q){
+  const box=$('pp-hits'); if(!box) return;
+  if(!q||q.trim().length<2){ box.classList.remove('show'); return; }
+  clearTimeout(PRE_T);
+  PRE_T=setTimeout(async ()=>{
+    const t=q.trim();
+    const {data}=await sb.from('productos').select('id,codigo,nombre,stock,precio_venta')
+      .eq('tipo','producto').eq('activo',true)
+      .or(`nombre.ilike.%${t}%,codigo.ilike.%${t}%`).limit(10);
+    if(!data||!data.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>';
+      box.classList.add('show'); return; }
+    box.innerHTML=data.map(p=>`<div class="cmp-prodhit" onclick='preElegirProd(${JSON.stringify(p).replace(/'/g,"&#39;")})'>
+      <b>${p.codigo||'—'}</b> · ${p.nombre||''} <span style="color:var(--muted)">(stock ${Number(p.stock)||0} · ${money(p.precio_venta)})</span></div>`).join('');
+    box.classList.add('show');
+  },250);
+}
+function preElegirProd(p){
+  window._preProd=p;
+  $('pp-sel').innerHTML=`<b style="color:var(--amber)">${p.codigo||''}</b> ${p.nombre||''} · ${money(p.precio_venta)}`;
+  $('pp-hits').classList.remove('show');
+  $('pp-q').value=(p.codigo?p.codigo+' · ':'')+(p.nombre||'');
+}
+function preProdGuardar(){
+  const p=window._preProd;
+  if(!p){ $('pp-msg').innerHTML='<div class="msg error">Elegí un producto.</div>'; return; }
+  if(Number(p.precio_venta||0)<=0){ $('pp-msg').innerHTML='<div class="msg error">Ese producto no tiene precio cargado.</div>'; return; }
+  const cant=Number($('pp-cant').value)||0;
+  if(cant<=0){ $('pp-msg').innerHTML='<div class="msg error">La cantidad debe ser mayor a cero.</div>'; return; }
+  if(PRE_NUEVO.items.some(l=>l.producto_id===p.id)){ $('pp-msg').innerHTML='<div class="msg error">Ese producto ya está en el presupuesto.</div>'; return; }
+  PRE_NUEVO.items.push({producto_id:p.id, codigo:p.codigo, descripcion:p.nombre,
+    cantidad:cant, precio:Number(p.precio_venta), es_servicio:false,
+    estado:Number(p.stock)>0?'disponible':'sin_stock'});
+  closeModal(); preItems(); preTotales();
+}
+
+// ---------- guardar ----------
+async function preGuardar(){
+  const m=$('pre-msg');
+  const set=(t,tp)=>{ m.innerHTML=`<div class="msg ${tp}">${t}</div>`; window.scrollTo(0,0); };
+  if(!PRE_NUEVO.cliente_id){ set('Elegí un cliente.','error'); return; }
+  if(!PRE_NUEVO.items.length){ set('Agregá al menos un ítem.','error'); return; }
+  const malo=PRE_NUEVO.items.find(l=>!(Number(l.precio)>0)||!(Number(l.cantidad)>0));
+  if(malo){ set('Revisá cantidades y precios: deben ser mayores a cero.','error'); return; }
+
+  const btn=$('pn-ok'); if(btn) btn.disabled=true;
+  set('Guardando…','ok');
+  // El backend recalcula todo: acá sólo se manda qué se eligió.
+  const {data,error}=await sb.rpc('crear_presupuesto',{
+    p_cliente_id:PRE_NUEVO.cliente_id,
+    p_vehiculo_id:PRE_NUEVO.vehiculo_id,
+    p_items:PRE_NUEVO.items.map(l=>({producto_id:l.producto_id, cantidad:l.cantidad,
+        precio_unitario:l.es_servicio?l.precio:null, descripcion:l.descripcion})),
+    p_descuento_pct:Number($('pn-desc').value)||0,
+    p_tipo_comprobante_id:Number($('pn-comp').value)||null,
+    p_alicuota_iva_id:Number($('pn-alic').value)||null,
+    p_validez_dias:Number($('pn-val').value)||15,
+    p_notas:$('pn-notas').value.trim()||null
+  });
+  if(error){ if(btn) btn.disabled=false; set('No se pudo guardar: '+error.message,'error'); return; }
+  preFicha(data, true);
+}
+
+// ══════════ FICHA ══════════
+async function preFicha(id, recien){
+  loading();
+  const {data:p}=await sb.from('presupuestos').select('*').eq('id',id).single();
+  if(!p){ content.innerHTML='<div class="msg error">Presupuesto no encontrado.</div>'; return; }
+  const [{data:items},cli,veh,cmp]=await Promise.all([
+    sb.rpc('presupuesto_detalle',{p_presupuesto_id:id}),
+    p.cliente_id? sb.from('clientes').select('nombre').eq('id',p.cliente_id).single():Promise.resolve({data:null}),
+    p.vehiculo_id? sb.from('vehiculos').select('*').eq('id',p.vehiculo_id).single():Promise.resolve({data:null}),
+    p.tipo_comprobante_id? sb.from('tipos_comprobante').select('nombre').eq('id',p.tipo_comprobante_id).single():Promise.resolve({data:null})
+  ]);
+  const v=veh.data;
+  const trans=PRE_TRANSICIONES[p.estado]||[];
+  const vence = p.fecha ? new Date(new Date(p.fecha).getTime()+(p.validez_dias||15)*86400000) : null;
+
+  pageTitle.textContent='Presupuesto #'+p.id;
+  topActions.innerHTML=`<button class="btn btn-ghost btn-sm" onclick="go('presupuestos')">← Presupuestos</button>`;
+  content.innerHTML=`
+    ${recien?'<div class="msg ok">✓ Presupuesto guardado. Los importes los calculó el servidor.</div>':''}
+    <div id="pre-msg"></div>
+
+    <div class="panel" style="margin-bottom:16px">
+      <div class="panel-head"><h3>${cli.data?cli.data.nombre:'Sin cliente'}</h3>
+        <div style="display:flex;gap:8px;align-items:center">
+          ${preEst(p.estado)}
+          ${trans.filter(t=>t!=='convertido').map(t=>
+            `<button class="btn btn-ghost btn-sm" onclick="preEstado(${p.id},'${t}')">${
+              (PRE_ESTADOS.find(e=>e.v===t)||{}).t}</button>`).join('')}
+          ${p.estado==='aprobado'?`<button class="btn btn-sm" onclick="preConvertir(${p.id})">Convertir a trabajo</button>`:''}
+        </div></div>
+      <div class="ficha-grid">
+        <div><span class="k">Vehículo</span><span>${v?`<b style="color:var(--amber)">${v.patente||''}</b> ${[v.marca,v.modelo,v.version].filter(Boolean).join(' ')}`:'—'}</span></div>
+        <div><span class="k">Fecha</span><span>${p.fecha}</span></div>
+        <div><span class="k">Vence</span><span>${vence?vence.toLocaleDateString('es-AR'):'—'} (${p.validez_dias} días)</span></div>
+        <div><span class="k">Comprobante</span><span>${cmp.data?cmp.data.nombre:'Mostrador'}</span></div>
+        ${p.notas?`<div style="grid-column:1/-1"><span class="k">Observaciones</span><span>${p.notas}</span></div>`:''}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>Ítems</h3></div>
+      <table class="cmp-lines"><thead><tr>
+        <th>Descripción</th><th style="width:11%">Tipo</th><th style="width:10%" class="cmp-num">Cant.</th>
+        <th style="width:16%" class="cmp-num">Precio unit.</th><th style="width:15%" class="cmp-num">Subtotal</th>
+      </tr></thead><tbody>
+        ${(items||[]).map(i=>`<tr>
+          <td>${i.codigo?`<b style="color:var(--amber)">${i.codigo}</b> · `:''}${i.descripcion||''}
+            ${i.estado_comercial==='sin_stock'?' <span class="tag warn">sin stock</span>':''}</td>
+          <td>${i.es_servicio?'<span class="tag warn">Servicio</span>':'<span class="tag ok">Producto</span>'}</td>
+          <td class="cmp-num">${Number(i.cantidad)}</td>
+          <td class="cmp-num">${money(i.precio_unitario)}</td>
+          <td class="cmp-num" style="font-weight:600">${money(i.subtotal)}</td>
+        </tr>`).join('')}
+      </tbody></table>
+      <div style="padding:16px 20px">
+        <div class="pre-tot">
+          <div class="pre-tt"><span>Subtotal</span><b>${money(p.subtotal)}</b></div>
+          ${Number(p.descuento_pct)>0?`<div class="pre-tt"><span>Descuento ${p.descuento_pct}%</span>
+            <b style="color:var(--danger)">−${money(p.descuento_monto)}</b></div>`:''}
+          ${Number(p.iva)>0?`<div class="pre-tt"><span>Neto</span><b>${money(p.neto)}</b></div>
+            <div class="pre-tt"><span>IVA</span><b>${money(p.iva)}</b></div>`:''}
+          <div class="pre-tt total"><span>TOTAL</span><b>${money(p.total)}</b></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function preEstado(id, estado){
+  const {error}=await sb.rpc('cambiar_estado_presupuesto',{p_presupuesto_id:id, p_estado:estado});
+  const m=$('pre-msg');
+  if(error){ m.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  preFicha(id);
+}
+
+function preConvertir(id){
+  openModal('Convertir a trabajo',
+    `<div style="font-size:14px">Se va a crear una orden de trabajo con los ítems y
+      <b>los precios congelados</b> de este presupuesto.</div>
+     <div style="font-size:12px;color:var(--muted);margin-top:10px">
+       No mueve stock ni genera venta. El presupuesto queda como convertido y no se puede volver atrás.</div>
+     <div id="pc-msg"></div>`,
+    `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" id="pc-ok" onclick="preDoConvertir(${id})">Convertir</button>`);
+}
+async function preDoConvertir(id){
+  const b=$('pc-ok'); if(b) b.disabled=true;
+  const {data,error}=await sb.rpc('convertir_presupuesto_a_trabajo',{p_presupuesto_id:id});
+  if(error){
+    if(b) b.disabled=false;
+    let t=error.message||'Error';
+    if(/ya generó un trabajo/i.test(t)) t='Este presupuesto ya generó un trabajo.';
+    else if(/aprobado/i.test(t)) t='Sólo se puede convertir un presupuesto aprobado.';
+    $('pc-msg').innerHTML='<div class="msg error">'+t+'</div>'; return;
+  }
+  closeModal();
+  await preFicha(id);
+  $('pre-msg').innerHTML=`<div class="msg ok">✓ Trabajo #${data} creado con los precios del presupuesto.
+    <button class="btn btn-sm" style="margin-left:10px" onclick="trbFicha(${data})">Abrir el trabajo</button></div>`;
+}
+
 PAGES.ventas=async ()=>{
   topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nueva venta (próximo)</button>`;
   await simpleList('ventas','Ventas',['Fecha','Forma pago','Estado','Total'],
