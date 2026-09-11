@@ -534,7 +534,7 @@ let currentUser = null, currentProfile = null;
 // ============ MENU ============
 const MENU = [
   {id:'panel',      label:'Panel',        ic:'▚'},
-  {id:'buscador',   label:'Buscador',     ic:'⌕'},
+  {id:'buscador',   label:'Buscador Wega', titulo:'Buscador de filtros Wega', ic:'⌕'},
   {id:'productos',  label:'Productos y servicios', ic:'▤'},
   {id:'stock',      label:'Stock',        ic:'▣'},
   {id:'compras',    label:'Compras',      ic:'▼'},
@@ -611,7 +611,7 @@ function go(id){
   currentPage=id;
   document.querySelectorAll('.navlink').forEach(n=>n.classList.toggle('active',n.dataset.id===id));
   const m=MENU.find(x=>x.id===id);
-  pageTitle.textContent=m.label;
+  pageTitle.textContent = m.titulo || m.label;   // `titulo` opcional: sólo texto visible
   topActions.innerHTML='';
   PAGES[id]();
 }
