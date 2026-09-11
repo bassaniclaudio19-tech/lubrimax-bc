@@ -463,6 +463,33 @@ select:disabled{opacity:.5}
 .prod-calc.total b{font-family:'Barlow Condensed';font-size:22px;color:var(--amber)}
 .prod-tag{font-size:10px;color:var(--muted);border:1px solid var(--line);
   padding:1px 6px;border-radius:10px;margin-left:4px;font-weight:400}
+
+/* ---- Productos y servicios: navegación por familias ---- */
+.pys-search{margin-bottom:12px}
+.pys-search input{width:100%;max-width:520px;padding:10px 14px;background:var(--panel);
+  border:1px solid var(--line);border-radius:8px;color:var(--text);font-size:14px}
+.pys-search input:focus{outline:none;border-color:var(--amber)}
+.pys-tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+.pys-tab{background:none;border:none;color:var(--muted);padding:9px 20px;cursor:pointer;
+  font-size:12px;letter-spacing:.6px;font-weight:600;border-bottom:2px solid transparent}
+.pys-tab:hover{color:var(--text)}
+.pys-tab.on{color:var(--amber);border-bottom-color:var(--amber)}
+.pys-layout{display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start}
+.pys-nav{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:6px;position:sticky;top:12px}
+.pys-item{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  padding:9px 12px;border-radius:7px;cursor:pointer;font-size:13px;color:var(--text)}
+.pys-item:hover{background:var(--graphite)}
+.pys-item.on{background:var(--graphite);color:var(--amber);font-weight:600}
+.pys-item b{font-size:12px;color:var(--muted);font-weight:600}
+.pys-item.on b{color:var(--amber)}
+.pys-item.vacia{opacity:.45}
+.pys-item.chico{padding:7px 12px 7px 24px;font-size:12px}
+.pys-sub{border-left:2px solid var(--line);margin:2px 0 6px 12px}
+.pys-fam{font-size:12px;color:var(--muted)}
+.pys-sub-txt{display:block;font-size:10px;opacity:.7;margin-top:2px}
+.pys-sinprecio{color:var(--danger);font-size:12px}
+@media(max-width:900px){ .pys-layout{grid-template-columns:1fr} .pys-nav{position:static} }
 </style>
 </head>
 <body>
@@ -662,19 +689,195 @@ PAGES.panel=async ()=>{
 };
 
 // ----- PRODUCTOS Y SERVICIOS -----
-PAGES.productos=async ()=>{
+// ─────────────────────────────────────────────────────────────────────
+// PRODUCTOS Y SERVICIOS · navegación por familias
+// Sólo esta pantalla. El Buscador Wega no se toca.
+// ─────────────────────────────────────────────────────────────────────
+
+// Etiquetas visibles de servicios. La base conserva sus categorías reales:
+// acá sólo se traduce para mostrar, sin renombrar nada.
+const SRV_GRUPOS = [
+  {label:'Lubricentro',          cats:['Lubricación']},
+  {label:'Tren delantero',       cats:['Tren delantero']},
+  {label:'Frenos',               cats:['Frenos']},
+  {label:'Rotación y balanceo',  cats:['Neumáticos']},
+  {label:'Grabado',              cats:['Grabados']},
+  {label:'Colocaciones y otros', cats:['Bracco','Otros']}
+];
+const FAM_CORTA = {'Alfombras y accesorios Ziel Technology':'Ziel Technology'};
+
+let PYS = {tab:'productos', familia:null, sub:null, grupo:null, q:'',
+           familias:[], tipos:[], cache:null};
+
+PAGES.productos = async () => {
   loading();
-  topActions.innerHTML=`<button class="btn" onclick="formProducto()">+ Nuevo</button>`;
-  const {data}=await sb.from('productos').select('*').order('nombre');
-  const rows=(data||[]).map(p=>`<tr>
-    <td>${p.codigo||'—'}</td><td>${p.nombre}</td>
-    <td><span class="tag ${p.tipo==='servicio'?'warn':'ok'}">${p.tipo}</span></td>
-    <td>${money(p.precio_venta)}</td>
-    <td>${p.tipo==='producto'?p.stock:'—'}</td>
-    <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p)})'>Editar</button></td>
-  </tr>`).join('');
-  content.innerHTML=tableShell('Catálogo',['Código','Nombre','Tipo','Precio','Stock','']  ,rows);
+  topActions.innerHTML = `<button class="btn" onclick="formProducto()">+ Nuevo</button>`;
+
+  if(!PYS.cache){
+    const [{data:fam},{data:tf}] = await Promise.all([
+      sb.from('familias_comerciales').select('id,nombre,orden,activo').order('orden'),
+      sb.from('tipos_filtro').select('id,nombre,orden').order('orden')
+    ]);
+    PYS.familias = fam||[]; PYS.tipos = tf||[];
+    // Contadores: una sola consulta liviana con los campos de agrupación.
+    const {data:cnt} = await sb.from('productos')
+      .select('id,tipo,familia_id,subfamilia,tipo_filtro_id,categoria');
+    PYS.cache = cnt||[];
+  }
+
+  content.innerHTML = `
+    <div class="pys-search">
+      <input id="pys-q" placeholder="Buscar por código o descripción…"
+             value="${PYS.q.replace(/"/g,'&quot;')}" oninput="pysBuscar(this.value)">
+    </div>
+    <div class="pys-tabs">
+      <button class="pys-tab ${PYS.tab==='productos'?'on':''}" onclick="pysTab('productos')">PRODUCTOS</button>
+      <button class="pys-tab ${PYS.tab==='servicios'?'on':''}" onclick="pysTab('servicios')">SERVICIOS</button>
+    </div>
+    <div class="pys-layout">
+      <div class="pys-nav" id="pys-nav"></div>
+      <div class="pys-tabla" id="pys-tabla"></div>
+    </div>`;
+  pysNav(); await pysTabla();
 };
+
+function pysTab(t){ PYS.tab=t; PYS.familia=null; PYS.sub=null; PYS.grupo=null; PAGES.productos(); }
+let PYS_T=null;
+function pysBuscar(v){ PYS.q=v; clearTimeout(PYS_T); PYS_T=setTimeout(()=>pysTabla(),250); }
+
+function pysSelFam(id){ PYS.familia=(PYS.familia===id?null:id); PYS.sub=null; pysNav(); pysTabla(); }
+function pysSelSub(s){ PYS.sub=(PYS.sub===s?null:s); pysNav(); pysTabla(); }
+function pysSelGrupo(g){ PYS.grupo=(PYS.grupo===g?null:g); pysNav(); pysTabla(); }
+
+// ---------- navegación lateral ----------
+function pysNav(){
+  const box=$('pys-nav'); if(!box) return;
+  const P=PYS.cache;
+
+  if(PYS.tab==='servicios'){
+    const total=P.filter(x=>x.tipo==='servicio').length;
+    box.innerHTML = `
+      <div class="pys-item ${PYS.grupo===null?'on':''}" onclick="pysSelGrupo(null)">
+        <span>Todos</span><b>${total}</b></div>
+      ${SRV_GRUPOS.map(g=>{
+        const n=P.filter(x=>x.tipo==='servicio' && g.cats.includes(x.categoria)).length;
+        return `<div class="pys-item ${PYS.grupo===g.label?'on':''} ${n===0?'vacia':''}"
+                     onclick="pysSelGrupo('${g.label}')">
+                  <span>${g.label}</span><b>${n}</b></div>`;
+      }).join('')}`;
+    return;
+  }
+
+  // PRODUCTOS: familias, con las vacías atenuadas pero visibles
+  box.innerHTML = PYS.familias.map(f=>{
+    const n = P.filter(x=>x.tipo==='producto' && x.familia_id===f.id).length;
+    const nom = FAM_CORTA[f.nombre] || f.nombre;
+    let sub='';
+    if(PYS.familia===f.id){
+      const hijos = pysSubniveles(f, P);
+      if(hijos.length){
+        sub = `<div class="pys-sub">
+          <div class="pys-item chico ${PYS.sub===null?'on':''}" onclick="event.stopPropagation();pysSelSub(null)">
+            <span>Todos</span><b>${n}</b></div>
+          ${hijos.map(h=>`<div class="pys-item chico ${PYS.sub===h.k?'on':''}"
+              onclick="event.stopPropagation();pysSelSub('${String(h.k).replace(/'/g,"\\'")}')">
+              <span>${h.label}</span><b>${h.n}</b></div>`).join('')}
+        </div>`;
+      }
+    }
+    return `<div class="pys-item ${PYS.familia===f.id?'on':''} ${n===0?'vacia':''}"
+                 onclick="pysSelFam(${f.id})">
+              <span>${nom}</span><b>${n}</b></div>${sub}`;
+  }).join('');
+}
+
+// Segundo nivel: Ziel por subfamilia, Wega por tipo de filtro.
+function pysSubniveles(f, P){
+  const dentro = P.filter(x=>x.tipo==='producto' && x.familia_id===f.id);
+  const conSub = dentro.filter(x=>x.subfamilia);
+  if(conSub.length){
+    const m={}; conSub.forEach(x=>m[x.subfamilia]=(m[x.subfamilia]||0)+1);
+    return Object.keys(m).sort().map(k=>({k:'sub:'+k, label:k, n:m[k]}));
+  }
+  const conTF = dentro.filter(x=>x.tipo_filtro_id);
+  if(conTF.length){
+    const m={}; conTF.forEach(x=>m[x.tipo_filtro_id]=(m[x.tipo_filtro_id]||0)+1);
+    return PYS.tipos.filter(t=>m[t.id])
+      .map(t=>({k:'tf:'+t.id, label:t.nombre, n:m[t.id]}));
+  }
+  return [];
+}
+
+// ---------- tabla ----------
+async function pysTabla(){
+  const box=$('pys-tabla'); if(!box) return;
+  box.innerHTML='<div class="loading">Cargando…</div>';
+
+  let q = sb.from('productos')
+    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,tipo_filtro_id,precio_venta,precio_final,stock,stock_minimo,costo,unidad,precio_venta_sugerido,margen_personalizado,ultima_alicuota_iva')
+    .eq('tipo', PYS.tab==='servicios' ? 'servicio' : 'producto')
+    .order('codigo').limit(500);
+
+  if(PYS.tab==='productos'){
+    if(PYS.familia) q=q.eq('familia_id',PYS.familia);
+    if(PYS.sub){
+      if(PYS.sub.startsWith('sub:')) q=q.eq('subfamilia', PYS.sub.slice(4));
+      else if(PYS.sub.startsWith('tf:')) q=q.eq('tipo_filtro_id', Number(PYS.sub.slice(3)));
+    }
+  } else if(PYS.grupo){
+    const g=SRV_GRUPOS.find(x=>x.label===PYS.grupo);
+    if(g) q=q.in('categoria', g.cats);
+  }
+  const t=PYS.q.trim();
+  if(t.length>=2) q=q.or(`codigo.ilike.%${t}%,nombre.ilike.%${t}%`);
+
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="panel"><div class="empty">Sin resultados.</div></div>'; return; }
+
+  const famNom = id => { const f=PYS.familias.find(x=>x.id===id);
+                         return f ? (FAM_CORTA[f.nombre]||f.nombre) : '—'; };
+  const tfNom  = id => { const t=PYS.tipos.find(x=>x.id===id); return t?t.nombre:null; };
+  // NULL es "sin precio definido"; 0 sería gratis. No se muestran igual.
+  const precio = p => p.precio_venta==null
+      ? '<span class="pys-sinprecio">Sin precio</span>' : money(p.precio_venta);
+
+  let rows, heads, titulo;
+  if(PYS.tab==='servicios'){
+    const grupoDe = c => (SRV_GRUPOS.find(g=>g.cats.includes(c))||{}).label || c || '—';
+    heads=['Código','Servicio','Categoría','Precio',''];
+    titulo=`Servicios (${data.length})`;
+    rows=data.map(p=>`<tr>
+      <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
+      <td>${p.nombre}</td>
+      <td><span class="tag warn">${grupoDe(p.categoria)}</span></td>
+      <td class="cmp-num">${precio(p)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
+    </tr>`).join('');
+  } else {
+    heads=['Código','Nombre','Familia / Subfamilia','Precio','Stock','Estado',''];
+    titulo=`Productos (${data.length}${data.length>=500?'+, refiná la búsqueda':''})`;
+    rows=data.map(p=>{
+      const st=Number(p.stock)||0, min=Number(p.stock_minimo)||0;
+      const estado = p.precio_venta==null ? '<span class="tag pend">Sin precio</span>'
+                   : st<=0 ? '<span class="tag pend">Sin stock</span>'
+                   : st<=min ? '<span class="tag warn">Reponer</span>'
+                   : '<span class="tag ok">Disponible</span>';
+      const sub = p.subfamilia || tfNom(p.tipo_filtro_id);
+      return `<tr>
+        <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
+        <td>${corto(p.nombre,56)}</td>
+        <td class="pys-fam">${famNom(p.familia_id)}${sub?`<span class="pys-sub-txt">${sub}</span>`:''}</td>
+        <td class="cmp-num">${precio(p)}</td>
+        <td class="cmp-num">${st}</td>
+        <td>${estado}</td>
+        <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
+      </tr>`;
+    }).join('');
+  }
+  box.innerHTML = tableShell(titulo, heads, rows);
+}
+
 let PROD_ALIC = null;      // alícuotas de IVA, se cachean
 let PROD_MARGEN = 45;      // margen general vigente, leído de la base
 let PROD_ACTUAL = null;
