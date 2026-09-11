@@ -501,6 +501,12 @@ select:disabled{opacity:.5}
   border-radius:8px;font-size:13px;color:var(--muted)}
 .stk-prev b{color:var(--amber);font-size:16px}
 .stk-err{color:var(--danger)}
+
+.stk-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 14px}
+.stk-chip{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+  padding:7px 16px;border-radius:20px;cursor:pointer;font-size:12px;font-weight:600}
+.stk-chip:hover{color:var(--text);border-color:var(--muted)}
+.stk-chip.on{background:var(--amber);border-color:var(--amber);color:#1a1a1a}
 </style>
 </head>
 <body>
@@ -1068,24 +1074,66 @@ PAGES.stock = async () => {
         <option value="haber" ${STK.solo==='haber'?'selected':''}>Sólo con existencia</option>
       </select>
     </div>
+    <div class="stk-chips" id="stk-chips"></div>
     <div id="stk-list"><div class="loading">Cargando…</div></div>`;
+  stkChips();
   await stkTabla();
 };
 
+// Accesos rápidos por familia. El desplegable sigue estando para el resto.
+function stkChips(){
+  const box=$('stk-chips'); if(!box) return;
+  const zi=(STK.familias||[]).find(f=>(f.nombre||'').toLowerCase().includes('ziel'));
+  const we=(STK.familias||[]).find(f=>f.nombre==='Filtros Wega');
+  const otras=(STK.familias||[]).filter(f=>f!==zi&&f!==we).map(f=>f.id);
+  const chips=[
+    {k:'',                       t:'Todos'},
+    {k:we?String(we.id):'',      t:'Filtros Wega'},
+    {k:zi?String(zi.id):'',      t:'Ziel Technology'},
+    {k:'otros:'+otras.join(','), t:'Otros'}
+  ];
+  box.innerHTML = chips.map(c=>`<button class="stk-chip ${STK.familia===c.k?'on':''}"
+      onclick="stkFiltro('familia','${c.k}')">${c.t}</button>`).join('');
+}
+
 let STK_T=null;
 function stkBuscar(v){ STK.q=v; clearTimeout(STK_T); STK_T=setTimeout(stkTabla,250); }
-function stkFiltro(k,v){ STK[k]=v; stkTabla(); }
+function stkFiltro(k,v){
+  STK[k]=v; stkChips();
+  const sel=$('stk-fam');
+  if(sel && k==='familia') sel.value = String(v).startsWith('otros:') ? '' : v;
+  stkTabla();
+}
 
 async function stkTabla(){
   const box=$('stk-list'); if(!box) return;
+  const t=STK.q.trim();
+
+  // La búsqueda también mira el código del PROVEEDOR: "ZTFT" debe encontrar
+  // ZTFT-TOR y ZTFT-RAM, cuyo codigo_proveedor es ZTFT.
+  let idsProv=[];
+  if(t.length>=2){
+    const {data:pp} = await sb.from('producto_proveedores')
+      .select('producto_id').ilike('codigo_proveedor','%'+t+'%').limit(300);
+    idsProv=(pp||[]).map(x=>x.producto_id);
+  }
+
   let q = sb.from('productos')
     .select('id,codigo,nombre,stock,stock_minimo,unidad,familia_id,subfamilia,precio_venta')
     .eq('tipo','producto').order('codigo').limit(400);
-  if(STK.familia) q=q.eq('familia_id',Number(STK.familia));
+  if(STK.familia){
+    if(String(STK.familia).startsWith('otros:')){
+      const ids=String(STK.familia).slice(6).split(',').filter(Boolean).map(Number);
+      if(ids.length) q=q.in('familia_id',ids);
+    } else q=q.eq('familia_id',Number(STK.familia));
+  }
   if(STK.solo==='cero')  q=q.lte('stock',0);
   if(STK.solo==='haber') q=q.gt('stock',0);
-  const t=STK.q.trim();
-  if(t.length>=2) q=q.or(`codigo.ilike.%${t}%,nombre.ilike.%${t}%`);
+  if(t.length>=2){
+    const partes=[`codigo.ilike.%${t}%`,`nombre.ilike.%${t}%`];
+    if(idsProv.length) partes.push(`id.in.(${idsProv.join(',')})`);
+    q=q.or(partes.join(','));
+  }
 
   const {data,error}=await q;
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
