@@ -7,9 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<!-- Versión FIJA. Con @2 el CDN servía la última 2.x y una actualización
-     de terceros dejó getSession() colgado sin error. No volver a usar @2. -->
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
+<!-- Versión FIJA en la que se probó que funciona con lock desactivado.
+     Con @2 el CDN sirve la última 2.x y una actualización de terceros
+     puede romper la app sin aviso. No volver a usar @2. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.116.0"></script>
 <style>
 :root{
   --graphite:#1A1D23; --panel:#242830; --panel-2:#2C313B;
