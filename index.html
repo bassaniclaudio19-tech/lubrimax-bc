@@ -7,7 +7,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- Versión FIJA. Con @2 el CDN servía la última 2.x y una actualización
+     de terceros dejó getSession() colgado sin error. No volver a usar @2. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4"></script>
 <style>
 :root{
   --graphite:#1A1D23; --panel:#242830; --panel-2:#2C313B;
@@ -520,7 +522,11 @@ select:disabled{opacity:.5}
 // ============ CONFIG SUPABASE ============
 const SUPABASE_URL = "https://fsgevsmotgrpbzpykkaq.supabase.co";
 const SUPABASE_KEY = "sb_publishable_I5ZGulR9JpDgQxqsTzcqnQ_P_sDbXaO";
-const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// lock: desactiva la coordinación entre pestañas del cliente de auth.
+// Es lo que se colgaba en versiones nuevas. Con un solo usuario no hace falta.
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { lock: (name, acquireTimeout, fn) => fn() }
+});
 
 let currentUser = null, currentProfile = null;
 
@@ -799,7 +805,7 @@ async function saveProducto(id){
     p_alicuota_iva: Number($('f-iva').value)||21,
     p_margen_personalizado: mTxt===''? null : Number(mTxt),
     p_stock_minimo: Number($('f-min').value)||0,
-    p_precio_lista_wega: $('f-wega').value.trim()===''? null : Number($('f-wega').value)
+    p_precio_venta_sugerido: $('f-wega').value.trim()===''? null : Number($('f-wega').value)
   });
   if(error){
     if(btn) btn.disabled=false;
