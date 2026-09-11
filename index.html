@@ -490,6 +490,17 @@ select:disabled{opacity:.5}
 .pys-sub-txt{display:block;font-size:10px;opacity:.7;margin-top:2px}
 .pys-sinprecio{color:var(--danger);font-size:12px}
 @media(max-width:900px){ .pys-layout{grid-template-columns:1fr} .pys-nav{position:static} }
+
+/* ---- Stock: modal de ajuste ---- */
+.stk-modos{display:flex;flex-direction:column;gap:8px;margin-top:4px}
+.stk-modo{display:flex;align-items:center;gap:9px;font-size:13px;cursor:pointer;
+  padding:8px 12px;border:1px solid var(--line);border-radius:7px}
+.stk-modo:hover{background:var(--graphite)}
+.stk-modo input{accent-color:var(--amber);cursor:pointer}
+.stk-prev{margin-top:12px;padding:11px 14px;background:var(--graphite);
+  border-radius:8px;font-size:13px;color:var(--muted)}
+.stk-prev b{color:var(--amber);font-size:16px}
+.stk-err{color:var(--danger)}
 </style>
 </head>
 <body>
@@ -1026,40 +1037,185 @@ async function saveProducto(id){
 }
 
 // ----- STOCK -----
-PAGES.stock=async ()=>{
+// ─────────────────────────────────────────────────────────────────────
+// STOCK · buscador, filtros por familia y ajuste con modos
+// Todo cambio pasa por la RPC ajustar_stock, que no se modifica.
+// ─────────────────────────────────────────────────────────────────────
+const STK_MOTIVOS = ['Inventario inicial','Recuento físico','Rotura o daño','Vencimiento',
+  'Faltante','Sobrante','Uso interno','Devolución de cliente','Devolución a proveedor','Otro'];
+
+let STK = {q:'', familia:'', solo:'', familias:null};
+
+PAGES.stock = async () => {
   loading();
-  const {data}=await sb.from('productos').select('*').eq('tipo','producto').order('nombre');
-  const rows=(data||[]).map(p=>{
-    const bajo=Number(p.stock)<=Number(p.stock_minimo);
-    return `<tr><td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
-      <td>${p.nombre}</td><td>${p.stock} ${p.unidad||''}</td><td>${p.stock_minimo}</td>
-      <td>${bajo?'<span class="tag pend">Reponer</span>':'<span class="tag ok">OK</span>'}</td>
-      <td>${esAdmin()?`<button class="btn btn-ghost btn-sm" onclick='ajusteStock(${JSON.stringify(p)})'>Ajustar</button>`:'—'}</td></tr>`;
-  }).join('');
-  content.innerHTML=tableShell('Existencias',['Código','Producto','Stock','Mínimo','Estado',''],rows);
+  if(!STK.familias){
+    const {data} = await sb.from('familias_comerciales').select('id,nombre,orden').order('orden');
+    STK.familias = data||[];
+  }
+  content.innerHTML = `
+    <div class="cli-toolbar">
+      <input id="stk-q" class="cli-search" placeholder="Buscar por código o descripción…"
+             value="${STK.q.replace(/"/g,'&quot;')}" oninput="stkBuscar(this.value)">
+      <select id="stk-fam" class="cli-search" style="max-width:230px" onchange="stkFiltro('familia',this.value)">
+        <option value="">Todas las familias</option>
+        ${STK.familias.map(f=>`<option value="${f.id}" ${STK.familia==f.id?'selected':''}>${
+          (f.nombre||'').replace('Alfombras y accesorios Ziel Technology','Ziel Technology')}</option>`).join('')}
+      </select>
+      <select id="stk-solo" class="cli-search" style="max-width:200px" onchange="stkFiltro('solo',this.value)">
+        <option value="">Todo el stock</option>
+        <option value="bajo"  ${STK.solo==='bajo'?'selected':''}>Sólo a reponer</option>
+        <option value="cero"  ${STK.solo==='cero'?'selected':''}>Sólo sin stock</option>
+        <option value="haber" ${STK.solo==='haber'?'selected':''}>Sólo con existencia</option>
+      </select>
+    </div>
+    <div id="stk-list"><div class="loading">Cargando…</div></div>`;
+  await stkTabla();
 };
-function ajusteStock(p){
-  openModal('Ajustar stock — '+p.nombre,`
-    <div class="field"><label>Stock actual</label><input value="${p.stock}" disabled></div>
-    <div class="field"><label>Nuevo stock</label><input id="f-nuevo" type="number" value="${p.stock}"></div>
-    <div class="field"><label>Motivo</label><input id="f-motivo" placeholder="Ajuste de inventario"></div>
-  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button><button class="btn" onclick="saveAjuste(${p.id},${p.stock})">Guardar</button>`);
+
+let STK_T=null;
+function stkBuscar(v){ STK.q=v; clearTimeout(STK_T); STK_T=setTimeout(stkTabla,250); }
+function stkFiltro(k,v){ STK[k]=v; stkTabla(); }
+
+async function stkTabla(){
+  const box=$('stk-list'); if(!box) return;
+  let q = sb.from('productos')
+    .select('id,codigo,nombre,stock,stock_minimo,unidad,familia_id,subfamilia,precio_venta')
+    .eq('tipo','producto').order('codigo').limit(400);
+  if(STK.familia) q=q.eq('familia_id',Number(STK.familia));
+  if(STK.solo==='cero')  q=q.lte('stock',0);
+  if(STK.solo==='haber') q=q.gt('stock',0);
+  const t=STK.q.trim();
+  if(t.length>=2) q=q.or(`codigo.ilike.%${t}%,nombre.ilike.%${t}%`);
+
+  const {data,error}=await q;
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  let filas=data||[];
+  // "a reponer" compara dos columnas, así que se filtra acá.
+  if(STK.solo==='bajo') filas=filas.filter(p=>Number(p.stock)<=Number(p.stock_minimo));
+  if(!filas.length){ box.innerHTML='<div class="panel"><div class="empty">Sin resultados.</div></div>'; return; }
+
+  const fam = id => { const f=(STK.familias||[]).find(x=>x.id===id);
+    return f ? (f.nombre||'').replace('Alfombras y accesorios Ziel Technology','Ziel Technology') : '—'; };
+  const rows = filas.map(p=>{
+    const st=Number(p.stock)||0, min=Number(p.stock_minimo)||0;
+    const estado = st<=0 ? '<span class="tag pend">Sin stock</span>'
+                 : st<=min ? '<span class="tag warn">Reponer</span>'
+                 : '<span class="tag ok">OK</span>';
+    return `<tr>
+      <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
+      <td>${corto(p.nombre,52)}</td>
+      <td class="pys-fam">${fam(p.familia_id)}${p.subfamilia?`<span class="pys-sub-txt">${p.subfamilia}</span>`:''}</td>
+      <td class="cmp-num"><b>${st}</b> <span style="color:var(--muted);font-size:11px">${p.unidad||''}</span></td>
+      <td class="cmp-num">${min}</td>
+      <td>${estado}</td>
+      <td>${esAdmin()?`<button class="btn btn-ghost btn-sm"
+            onclick='ajusteStock(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Ajustar</button>`:'—'}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = tableShell(`Existencias (${filas.length}${filas.length>=400?'+, refiná la búsqueda':''})`,
+    ['Código','Producto','Familia','Stock','Mínimo','Estado',''], rows);
 }
-async function saveAjuste(id,anterior){
-  const nuevo=+$('f-nuevo').value, motivo=$('f-motivo').value.trim();
-  if(isNaN(nuevo)||nuevo<0){ alert('El stock no puede ser negativo.'); return; }
-  // Ajuste transaccional en el servidor: actualiza el stock y deja el
-  // movimiento en el libro mayor. Solo admin (validado en Supabase).
+
+// ---------- modal de ajuste ----------
+function ajusteStock(p){
+  const st=Number(p.stock)||0;
+  openModal('Ajustar stock', `
+    <div class="trb-veh">
+      <div class="trb-veh-k">Producto</div>
+      <div class="trb-veh-v"><span style="color:var(--amber)">${p.codigo||'—'}</span> · ${corto(p.nombre,46)}</div>
+      <div class="caj-sub">Stock actual: <b style="color:var(--text)">${st} ${p.unidad||''}</b></div>
+    </div>
+
+    <div class="field"><label>Tipo de ajuste</label>
+      <div class="stk-modos">
+        <label class="stk-modo"><input type="radio" name="stk-modo" value="set" checked
+          onchange="stkModo()"> Establecer existencia real</label>
+        <label class="stk-modo"><input type="radio" name="stk-modo" value="sum"
+          onchange="stkModo()"> Sumar</label>
+        <label class="stk-modo"><input type="radio" name="stk-modo" value="res"
+          onchange="stkModo()"> Restar</label>
+      </div>
+    </div>
+
+    <div class="field"><label id="stk-lbl">Existencia real</label>
+      <input id="stk-cant" type="number" min="0" step="0.01" value="${st}" oninput="stkModo()"></div>
+
+    <div class="field"><label>Motivo *</label>
+      <select id="stk-motivo" onchange="stkOtro()">
+        <option value="">Elegí un motivo…</option>
+        ${STK_MOTIVOS.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select></div>
+    <div class="field" id="stk-otro-box" style="display:none">
+      <label>Detalle del motivo *</label>
+      <input id="stk-otro" placeholder="Explicá brevemente el motivo"></div>
+
+    <div class="stk-prev" id="stk-prev" data-actual="${st}"></div>
+    <div id="stk-msg"></div>
+  `, `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn" id="stk-ok" onclick="saveAjuste(${p.id},${st})">Confirmar</button>`);
+  stkModo();
+}
+
+function stkModoActual(){
+  const r=document.querySelector('input[name="stk-modo"]:checked');
+  return r?r.value:'set';
+}
+// Calcula la existencia FINAL, que es lo que espera ajustar_stock.
+function stkFinal(actual, modo, cant){
+  if(modo==='sum') return actual + cant;
+  if(modo==='res') return actual - cant;
+  return cant;
+}
+function stkModo(){
+  const modo=stkModoActual();
+  const lbl=$('stk-lbl'); const inp=$('stk-cant'); const prev=$('stk-prev');
+  if(!lbl||!inp||!prev) return;
+  lbl.textContent = modo==='set' ? 'Existencia real' : (modo==='sum' ? 'Cantidad a sumar' : 'Cantidad a restar');
+  const actual=Number(prev.dataset.actual)||0;
+  const cant=Number(inp.value)||0;
+  const fin=stkFinal(actual,modo,cant);
+  prev.innerHTML = fin<0
+    ? `<span class="stk-err">No se puede restar ${cant}: el stock quedaría en ${fin}.</span>`
+    : `Stock resultante: <b>${fin}</b>`;
+}
+function stkOtro(){
+  const s=$('stk-motivo'), box=$('stk-otro-box');
+  if(s&&box) box.style.display = s.value==='Otro' ? '' : 'none';
+}
+
+async function saveAjuste(id, anterior){
+  const m=$('stk-msg');
+  const set=(t)=>{ m.innerHTML='<div class="msg error">'+t+'</div>'; };
+  const modo=stkModoActual();
+  const cant=Number($('stk-cant').value);
+  if(isNaN(cant)||cant<0){ set('La cantidad no puede ser negativa.'); return; }
+
+  const motivoSel=$('stk-motivo').value;
+  if(!motivoSel){ set('Elegí un motivo.'); return; }
+  let motivo=motivoSel;
+  if(motivoSel==='Otro'){
+    const txt=$('stk-otro').value.trim();
+    if(!txt){ set('Con motivo "Otro" el detalle es obligatorio.'); return; }   // obligatorio
+    motivo='Otro: '+txt;
+  }
+
+  const nuevo = stkFinal(Number(anterior)||0, modo, cant);
+  if(nuevo<0){ set(`No se puede restar ${cant}: el stock quedaría en ${nuevo}.`); return; }
+  if(nuevo===Number(anterior)){ set('El stock resultante es igual al actual.'); return; }
+
+  const btn=$('stk-ok'); if(btn) btn.disabled=true;
+  // La RPC recibe SIEMPRE la existencia final. Los modos son sólo de interfaz.
   const {error}=await sb.rpc('ajustar_stock',{
-    p_producto_id:id, p_nuevo_stock:nuevo, p_motivo:motivo||null
+    p_producto_id:id, p_nuevo_stock:nuevo, p_motivo:motivo
   });
   if(error){
-    alert(/administrador/i.test(error.message)
-      ? 'Solo un administrador puede ajustar stock.'
+    if(btn) btn.disabled=false;
+    set(/administrador/i.test(error.message)
+      ? 'Sólo un administrador puede ajustar stock.'
       : 'No se pudo ajustar: '+error.message);
     return;
   }
-  closeModal(); PAGES.stock();
+  closeModal(); stkTabla();
 }
 
 // ----- CLIENTES (ficha 360) -----
