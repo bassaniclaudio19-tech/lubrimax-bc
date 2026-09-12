@@ -4097,7 +4097,14 @@ function vrToggle(){
   if(cond&&cw) cw.style.display = cond.value==='contado'?'':'none';
   if(f&&pw)    pw.style.display = f.value==='si'?'':'none';
 }
+// Clave de la operación en curso. Se conserva entre reintentos: doble clic,
+// timeout o error de red reutilizan la MISMA clave, y el servidor devuelve la
+// venta ya creada en vez de duplicarla. Se libera sólo tras éxito confirmado.
+let VR_KEY = null;
+let VR_ENVIANDO = false;
+
 async function vrGuardar(){
+  if(VR_ENVIANDO) return;                       // evita dos envíos en paralelo
   const m=$('vr-msg');
   const set=(t,tp)=>{ if(m) m.innerHTML=`<div class="msg ${tp}">${t}</div>`; };
   const cliente_id=Number($('vr-cli').value)||null;
@@ -4106,41 +4113,64 @@ async function vrGuardar(){
   const caja_id=forma_pago==='contado'?(Number($('vr-caja').value)||null):null;
   const comp_id=facturada?(Number($('vr-comp').value)||null):null;
   const alic_id=Number($('vr-alic').value)||null;
+  if(!CART.length){ set('El carrito está vacío.','error'); return; }
   if(forma_pago==='contado'&&!caja_id){ set('Elegí la caja.','error'); return; }
   if(forma_pago==='cta_cte'&&!cliente_id){ set('Para cuenta corriente elegí un cliente.','error'); return; }
   if(facturada&&!comp_id){ set('Elegí el comprobante.','error'); return; }
 
+  // una sola clave por operación; si ya hay una pendiente, se reutiliza
+  if(!VR_KEY) VR_KEY = (crypto.randomUUID ? crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+        const r=Math.random()*16|0; return (c==='x'?r:(r&0x3|0x8)).toString(16);}));
+
+  VR_ENVIANDO=true;
   const btn=$('vr-ok'); if(btn) btn.disabled=true;
   set('Registrando…','ok');
 
-  const cab={cliente_id, fecha:new Date().toISOString().slice(0,10),
-    facturada, naturaleza:facturada?'fiscal':'interna', tipo_comprobante_id:comp_id,
-    forma_pago, estado_pago: forma_pago==='cta_cte'?'pendiente':'pagado',
-    notas:'Venta rápida desde Buscador', creado_por:currentUser.id};
-  const {data:v,error:e1}=await sb.from('ventas').insert(cab).select('id').single();
-  if(e1){ if(btn) btn.disabled=false; set('No se pudo crear la venta: '+e1.message,'error'); return; }
-
-  const comp=VR_CMP.find(c=>c.id===comp_id);
-  const discrimina = facturada ? (comp?comp.discrimina_iva:true) : false;
-  const items=CART.map(l=>{
-    const base=l.precio*l.cantidad;
-    const row={venta_id:v.id, producto_id:l.producto_id, descripcion:l.codigo||l.descripcion||null,
-      cantidad:l.cantidad, precio_unitario:l.precio,
-      alicuota_iva_id: facturada?alic_id:null, subtotal:base};
-    row.neto_unitario = (facturada && !discrimina) ? 0 : l.precio;
-    return row;
+  // El frontend NO define el precio: sólo qué, cuánto y qué descuento.
+  // El servicio sin precio maestro usa el mecanismo explícito de crear_venta.
+  const items = CART.map(l=>{
+    const it = {producto_id:l.producto_id, cantidad:l.cantidad,
+                descuento_pct: Number(l.descuento_pct)||0};
+    if(l.es_servicio && l.precio_manual) it.precio_manual = Number(l.precio);
+    return it;
   });
-  const {error:e2}=await sb.from('venta_items').insert(items);
-  if(e2){ if(btn) btn.disabled=false; set('La venta se creó pero fallaron los ítems: '+e2.message,'error'); return; }
 
-  const {error:e3}=await sb.rpc('registrar_venta',{p_venta_id:v.id,p_caja_id:caja_id});
-  if(e3){ if(btn) btn.disabled=false;
-    set('No se pudo registrar: '+(/caja/i.test(e3.message)?'falta elegir la caja.':e3.message),'error'); return; }
+  const {data:ventaId, error} = await sb.rpc('crear_venta',{
+    p_idempotency_key: VR_KEY,
+    p_items: items,
+    p_forma_pago: forma_pago,
+    p_cliente_id: cliente_id,
+    p_facturada: facturada,
+    p_tipo_comprobante_id: comp_id,
+    p_alicuota_iva_id: alic_id,
+    p_caja_id: caja_id,
+    p_notas: 'Venta rápida desde Buscador'
+  });
 
+  VR_ENVIANDO=false;
+  if(error){
+    if(btn) btn.disabled=false;
+    // Error de red o timeout: no se sabe si el servidor llegó a procesar.
+    // Se CONSERVA la clave para poder reintentar la misma operación.
+    const incierto = !error.code || /network|timeout|fetch|failed/i.test(error.message||'');
+    let t = error.message||'Error';
+    if(/stock insuficiente/i.test(t))       t='No hay stock suficiente para esa cantidad.';
+    else if(/sin precio definido/i.test(t)) t='Hay un producto sin precio. Cargalo antes de vender.';
+    else if(/descuento/i.test(t))           t='El descuento supera el máximo permitido para tu usuario.';
+    else if(/administrador/i.test(t))       t='Esa operación requiere un administrador.';
+    else if(/inactivo/i.test(t))            t='Hay un producto inactivo en el carrito.';
+    else if(/caja/i.test(t))                t='Falta elegir la caja.';
+    set(t + (incierto ? ' Podés reintentar: la operación no se va a duplicar.' : ''), 'error');
+    return;
+  }
+
+  VR_KEY = null;                                // éxito confirmado: se libera
   CART=[]; renderCart();
-  set('✓ Venta #'+v.id+' registrada. Stock y '+(forma_pago==='cta_cte'?'cuenta corriente':'caja')+' actualizados.','ok');
+  set('✓ Venta #'+ventaId+' registrada. Stock y '+(forma_pago==='cta_cte'?'cuenta corriente':'caja')+' actualizados.','ok');
   setTimeout(()=>{ closeModal(); },1400);
 }
+
 
 // ============ MODO CÓDIGO ============
 function formCodigo(){
