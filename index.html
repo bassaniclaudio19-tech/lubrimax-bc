@@ -2787,11 +2787,181 @@ async function preDoConvertir(id){
     <button class="btn btn-sm" style="margin-left:10px" onclick="trbFicha(${data})">Abrir el trabajo</button></div>`;
 }
 
-PAGES.ventas=async ()=>{
-  topActions.innerHTML=`<button class="btn btn-ghost" disabled>+ Nueva venta (próximo)</button>`;
+// ─────────────────────────────────────────────────────────────────────
+// VENTAS · Nueva venta
+// Reutiliza el MISMO carrito del Buscador Wega (CART, cartAdd, cartDel,
+// cartQty, cartTotal) y el mismo cierre (ventaRapida → vrGuardar →
+// crear_venta). No hay un segundo sistema de ventas.
+// Lo único propio es el buscador general sobre todo el catálogo.
+// ─────────────────────────────────────────────────────────────────────
+let NV_Q = '', NV_T = null;
+
+PAGES.ventas = async () => {
+  topActions.innerHTML = `<button class="btn" onclick="nuevaVenta()">+ Nueva venta</button>`;
   await simpleList('ventas','Ventas',['Fecha','Forma pago','Estado','Total'],
     v=>`<tr><td>${v.fecha}</td><td>${v.forma_pago}</td><td><span class="tag ${v.estado_pago==='pagado'?'ok':'pend'}">${v.estado_pago}</span></td><td>${money(v.total)}</td></tr>`);
 };
+
+function nuevaVenta(){
+  pageTitle.textContent = 'Nueva venta';
+  topActions.innerHTML = `<button class="btn btn-ghost" onclick="go('ventas')">← Volver</button>`;
+  content.innerHTML = `
+    <div class="panel" style="margin-bottom:16px">
+      <div style="padding:16px">
+        <div class="field" style="margin:0">
+          <label>Buscar producto o servicio</label>
+          <input id="nv-q" placeholder="Código, nombre o código de proveedor…"
+                 value="${NV_Q.replace(/"/g,'&quot;')}" oninput="nvBuscar(this.value)" autofocus>
+        </div>
+        <div id="nv-res" style="margin-top:12px"></div>
+      </div>
+    </div>
+    <div id="nv-cart"></div>`;
+  nvCarrito();
+  if(NV_Q.trim().length>=2) nvResultados();
+}
+
+function nvBuscar(v){ NV_Q=v; clearTimeout(NV_T); NV_T=setTimeout(nvResultados,250); }
+
+// Búsqueda general: NO usa el Buscador Wega ni sus RPC.
+async function nvResultados(){
+  const box=$('nv-res'); if(!box) return;
+  const t=NV_Q.trim();
+  if(t.length<2){ box.innerHTML='<div style="color:var(--muted);font-size:12px">Escribí al menos 2 caracteres.</div>'; return; }
+  box.innerHTML='<div class="loading">Buscando…</div>';
+
+  // el caché de familias puede no estar cargado si no se pasó por Stock
+  if(!STK.familias){
+    const {data:f}=await sb.from('familias_comerciales').select('id,nombre,orden').order('orden');
+    STK.familias=f||[];
+  }
+
+  // también por código del proveedor (Ziel y futuros)
+  let ids=[];
+  const {data:pp}=await sb.from('producto_proveedores')
+    .select('producto_id').ilike('codigo_proveedor','%'+t+'%').limit(200);
+  ids=(pp||[]).map(x=>x.producto_id);
+
+  const partes=[`codigo.ilike.%${t}%`,`nombre.ilike.%${t}%`];
+  if(ids.length) partes.push(`id.in.(${ids.join(',')})`);
+  const {data,error}=await sb.from('productos')
+    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,precio_final,precio_venta,stock,unidad')
+    .eq('activo',true).or(partes.join(',')).order('codigo').limit(60);
+  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
+  if(!data||!data.length){ box.innerHTML='<div class="empty">Sin resultados.</div>'; return; }
+
+  const fam = id => { const f=(STK.familias||[]).find(x=>x.id===id);
+    return f ? (f.nombre||'').replace('Alfombras y accesorios Ziel Technology','Ziel Technology') : ''; };
+
+  box.innerHTML = `<table class="cmp-lines"><thead><tr>
+      <th>Código</th><th>Producto</th><th>Familia</th>
+      <th class="cmp-num">Precio</th><th class="cmp-num">Stock</th><th></th></tr></thead><tbody>
+    ${data.map(p=>{
+      const srv = p.tipo==='servicio';
+      const sinPrecio = p.precio_venta==null;
+      // servicio sin precio maestro: se puede agregar y definir el importe
+      const srvManual = srv && !(Number(p.precio_final)>0);
+      const puede = srvManual || !sinPrecio;
+      const precio = sinPrecio
+        ? (srvManual ? '<span style="color:var(--muted)">a definir</span>'
+                     : '<span class="pys-sinprecio">Sin precio</span>')
+        : money(p.precio_venta);
+      return `<tr>
+        <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
+        <td>${corto(p.nombre,44)}${srv?' <span class="tag warn">servicio</span>':''}</td>
+        <td class="pys-fam">${srv?(p.categoria||''):fam(p.familia_id)}${p.subfamilia?`<span class="pys-sub-txt">${p.subfamilia}</span>`:''}</td>
+        <td class="cmp-num">${precio}</td>
+        <td class="cmp-num">${srv?'—':(Number(p.stock)||0)}</td>
+        <td>${puede
+          ? `<button class="btn btn-sm" onclick='nvAgregar(${JSON.stringify({
+                id:p.id,codigo:p.codigo,nombre:p.nombre,tipo:p.tipo,
+                precio:Number(p.precio_venta)||0,stock:Number(p.stock)||0,manual:srvManual
+              }).replace(/'/g,"&#39;")})'>Agregar</button>`
+          : `<span style="color:var(--muted);font-size:11px">no vendible</span>`}</td>
+      </tr>`;
+    }).join('')}</tbody></table>`;
+}
+
+// Agrega al MISMO CART que usa el Buscador Wega.
+function nvAgregar(p){
+  const ya = CART.find(x=>x.producto_id===p.id);
+  if(ya){ ya.cantidad++; }
+  else{
+    CART.push({producto_id:p.id, codigo:p.codigo, descripcion:p.nombre,
+               precio:p.precio, stock:p.stock, cantidad:1,
+               es_servicio: p.tipo==='servicio',
+               precio_manual: !!p.manual,          // sólo servicios sin precio
+               descuento_pct: 0});
+  }
+  nvCarrito(); renderCart();
+}
+
+function nvSet(id, campo, v){
+  const l=CART.find(x=>x.producto_id===id); if(!l) return;
+  if(campo==='cantidad')  l.cantidad = Math.max(1, Number(v)||1);
+  if(campo==='descuento') l.descuento_pct = Math.min(100, Math.max(0, Number(v)||0));
+  if(campo==='precio')    l.precio = Math.max(0, Number(v)||0);
+  nvCarrito(); renderCart();
+}
+function nvQuitar(id){ cartDel(id); nvCarrito(); }
+
+// Total ESTIMADO. El servidor recalcula y es la autoridad.
+function nvTotal(){
+  return CART.reduce((s,l)=>{
+    const d = Number(l.descuento_pct)||0;
+    return s + (Number(l.precio)||0) * (1-d/100) * l.cantidad;
+  },0);
+}
+
+function nvCarrito(){
+  const box=$('nv-cart'); if(!box) return;
+  if(!CART.length){
+    box.innerHTML='<div class="panel"><div class="empty">El carrito está vacío. Buscá un producto o servicio y agregalo.</div></div>';
+    return;
+  }
+  const faltaPrecio = CART.some(l=>l.precio_manual && !(Number(l.precio)>0));
+  box.innerHTML = `
+    <div class="panel">
+      <div class="panel-h"><h3>Carrito (${CART.length})</h3></div>
+      <table class="cmp-lines"><thead><tr>
+        <th>Producto</th><th style="width:90px">Cant.</th>
+        <th style="width:110px">Precio</th><th style="width:90px">Desc. %</th>
+        <th class="cmp-num">Subtotal</th><th></th></tr></thead><tbody>
+      ${CART.map(l=>{
+        const d=Number(l.descuento_pct)||0;
+        const sub=(Number(l.precio)||0)*(1-d/100)*l.cantidad;
+        return `<tr>
+          <td><b style="color:var(--amber)">${l.codigo||''}</b>
+              ${l.es_servicio?' <span class="tag warn">servicio</span>':''}
+              <div style="font-size:11px;color:var(--muted)">${corto(l.descripcion||'',44)}</div></td>
+          <td><input type="number" min="1" value="${l.cantidad}"
+                     onchange="nvSet(${l.producto_id},'cantidad',this.value)"></td>
+          <td>${l.precio_manual
+                ? `<input type="number" min="0" step="0.01" value="${l.precio||''}" placeholder="importe"
+                          onchange="nvSet(${l.producto_id},'precio',this.value)">`
+                : `<span style="font-size:13px">${money(l.precio)}</span>`}</td>
+          <td><input type="number" min="0" max="100" step="0.01" value="${d}"
+                     onchange="nvSet(${l.producto_id},'descuento',this.value)"></td>
+          <td class="cmp-num">${money(sub)}</td>
+          <td><button class="cmp-delrow" onclick="nvQuitar(${l.producto_id})">×</button></td>
+        </tr>`;
+      }).join('')}</tbody></table>
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  padding:14px 18px;border-top:1px solid var(--line)">
+        <div style="font-size:13px;color:var(--muted)">
+          Total estimado <b style="color:var(--amber);font-size:20px;margin-left:8px">${money(nvTotal())}</b>
+          <div style="font-size:11px;margin-top:2px">El importe definitivo lo calcula el servidor.</div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost" onclick="CART=[];nvCarrito();renderCart()">Vaciar</button>
+          <button class="btn" ${faltaPrecio?'disabled title="Hay un servicio sin importe"':''}
+                  onclick="ventaRapida()">Continuar</button>
+        </div>
+      </div>
+      ${faltaPrecio?'<div style="padding:0 18px 14px"><div class="msg error">Completá el importe de los servicios antes de continuar.</div></div>':''}
+    </div>`;
+}
+
 // ----- TRABAJOS (orden de trabajo) -----
 const TRB_ESTADOS=[
   {v:'pendiente',          t:'Pendiente',           c:'warn'},
@@ -4016,8 +4186,11 @@ function cartAdd(r){
   const id=r.producto_id;
   const ya=CART.find(x=>x.producto_id===id);
   if(ya){ ya.cantidad++; } else {
+    // Campos nuevos con valores neutros: el Buscador Wega sigue vendiendo
+    // productos físicos sin precio manual y sin descuento.
     CART.push({producto_id:id,codigo:r.codigo,descripcion:r.descripcion,
-               precio:Number(r.precio)||0,stock:Number(r.stock)||0,cantidad:1});
+               precio:Number(r.precio)||0,stock:Number(r.stock)||0,cantidad:1,
+               es_servicio:false, precio_manual:false, descuento_pct:0});
   }
   renderCart();
 }
@@ -4167,6 +4340,7 @@ async function vrGuardar(){
 
   VR_KEY = null;                                // éxito confirmado: se libera
   CART=[]; renderCart();
+  if($('nv-cart')) nvCarrito();                 // refresca la pantalla Nueva venta
   set('✓ Venta #'+ventaId+' registrada. Stock y '+(forma_pago==='cta_cte'?'cuenta corriente':'caja')+' actualizados.','ok');
   setTimeout(()=>{ closeModal(); },1400);
 }
