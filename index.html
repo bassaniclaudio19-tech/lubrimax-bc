@@ -2844,11 +2844,23 @@ async function nvResultados(){
 
   const partes=[`codigo.ilike.%${t}%`,`nombre.ilike.%${t}%`];
   if(ids.length) partes.push(`id.in.(${ids.join(',')})`);
-  const {data,error}=await sb.from('productos')
-    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,precio_final,precio_venta,stock,unidad')
-    .eq('activo',true).or(partes.join(',')).order('codigo').limit(60);
+  const campos='id,codigo,nombre,tipo,categoria,subfamilia,familia_id,precio_final,precio_venta,stock,unidad';
+
+  // DOS consultas separadas, con cupo propio cada una. Antes era una sola con
+  // tope de 60 ordenada por código: con términos amplios los productos (AKX,
+  // FAP, JFA…) llenaban el cupo antes de llegar a los SRV-*, y los servicios
+  // nunca aparecían. Con cupos separados no compiten entre sí.
+  const [rp, rs] = await Promise.all([
+    sb.from('productos').select(campos)
+      .eq('activo',true).eq('tipo','producto').or(partes.join(',')).order('codigo').limit(50),
+    sb.from('productos').select(campos)
+      .eq('activo',true).eq('tipo','servicio').or(partes.join(',')).order('codigo').limit(30)
+  ]);
+  const error = rp.error || rs.error;
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  if(!data||!data.length){ box.innerHTML='<div class="empty">Sin resultados.</div>'; return; }
+  // los servicios van primero: son pocos y se buscan por nombre
+  const data = [...(rs.data||[]), ...(rp.data||[])];
+  if(!data.length){ box.innerHTML='<div class="empty">Sin resultados.</div>'; return; }
 
   const fam = id => { const f=(STK.familias||[]).find(x=>x.id===id);
     return f ? (f.nombre||'').replace('Alfombras y accesorios Ziel Technology','Ziel Technology') : ''; };
@@ -2860,12 +2872,12 @@ async function nvResultados(){
       const srv = p.tipo==='servicio';
       const sinPrecio = p.precio_venta==null;
       // servicio sin precio maestro: se puede agregar y definir el importe
+      // un servicio sin precio maestro puede venir con NULL o con 0
       const srvManual = srv && !(Number(p.precio_final)>0);
       const puede = srvManual || !sinPrecio;
-      const precio = sinPrecio
-        ? (srvManual ? '<span style="color:var(--muted)">a definir</span>'
-                     : '<span class="pys-sinprecio">Sin precio</span>')
-        : money(p.precio_venta);
+      const precio = srvManual
+        ? '<span style="color:var(--muted)">Precio manual</span>'
+        : (sinPrecio ? '<span class="pys-sinprecio">Sin precio</span>' : money(p.precio_venta));
       return `<tr>
         <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
         <td>${corto(p.nombre,44)}${srv?' <span class="tag warn">servicio</span>':''}</td>
