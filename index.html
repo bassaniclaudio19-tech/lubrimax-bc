@@ -866,13 +866,34 @@ async function pysTabla(){
     const grupoDe = c => (SRV_GRUPOS.find(g=>g.cats.includes(c))||{}).label || c || '—';
     heads=['Código','Servicio','Categoría','Precio',''];
     titulo=`Servicios (${data.length})`;
-    rows=data.map(p=>`<tr>
-      <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
-      <td>${p.nombre}</td>
-      <td><span class="tag warn">${grupoDe(p.categoria)}</span></td>
-      <td class="cmp-num">${precio(p)}</td>
-      <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
-    </tr>`).join('');
+    rows=data.map(p=>{
+      const inactivo = p.activo===false;
+      const tienePrecio = Number(p.precio_venta)>0;   // maestro > 0
+      let btnAgregar;
+      if(inactivo){
+        btnAgregar = `<span style="color:var(--muted);font-size:11px">inactivo</span>`;
+      } else if(tienePrecio){
+        // Servicio con precio maestro: se agrega directo (precio_manual:false).
+        btnAgregar = `<button class="btn btn-sm" data-add="s${p.id}" onclick='pysAddServ(${JSON.stringify({
+              id:p.id,codigo:p.codigo,nombre:p.nombre,
+              precio:Number(p.precio_venta)||0,manual:false
+            }).replace(/'/g,"&#39;")}, this)'>Agregar</button>`;
+      } else {
+        // Servicio $0 / NULL: pide importe para esta operación (precio_manual:true).
+        btnAgregar = `<button class="btn btn-sm" data-add="s${p.id}" onclick='pysServManual(${JSON.stringify({
+              id:p.id,codigo:p.codigo,nombre:p.nombre
+            }).replace(/'/g,"&#39;")})'>Agregar</button>`;
+      }
+      return `<tr>
+        <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
+        <td>${p.nombre}</td>
+        <td><span class="tag warn">${grupoDe(p.categoria)}</span></td>
+        <td class="cmp-num">${precio(p)}</td>
+        <td style="white-space:nowrap;display:flex;gap:6px;justify-content:flex-end">
+          ${btnAgregar}
+          <button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
+      </tr>`;
+    }).join('');
   } else {
     heads=['Código','Nombre','Familia / Subfamilia','Precio','Stock','Estado',''];
     titulo=`Productos (${data.length}${data.length>=500?'+, refiná la búsqueda':''})`;
@@ -922,6 +943,53 @@ function pysAdd(p, btn){
     btn.disabled = true;
     setTimeout(()=>{ btn.textContent = prev; btn.disabled = false; }, 900);
   }
+}
+
+// Feedback visual reutilizable (igual patrón que pysAdd), sin alert().
+function pysBtnOK(btn){
+  if(!btn) return;
+  const prev = btn.textContent;
+  btn.textContent = 'Agregado ✓';
+  btn.disabled = true;
+  setTimeout(()=>{ btn.textContent = prev; btn.disabled = false; }, 900);
+}
+
+// Servicio con precio maestro > 0: al MISMO CART vía nvAgregar (es_servicio:true,
+// precio_manual:false). Suma cantidad si ya está, no duplica línea.
+function pysAddServ(s, btn){
+  nvAgregar({id:s.id, codigo:s.codigo, nombre:s.nombre,
+             precio:Number(s.precio)||0, stock:0, tipo:'servicio', manual:false});
+  renderCart();
+  pysBtnOK(btn);
+}
+
+// Servicio $0 / NULL: modal chico para el importe de ESTA operación. No toca
+// ningún precio maestro. Reutiliza nvAgregar con manual:true.
+function pysServManual(s){
+  openModal('Precio del servicio',`
+    <div class="field"><label>Servicio</label>
+      <input value="${(s.nombre||'').replace(/"/g,'&quot;')}" disabled></div>
+    <div class="field"><label>Precio para esta operación *</label>
+      <input id="psm-precio" type="number" min="0.01" step="0.01" autofocus
+             placeholder="0,00" onkeydown="if(event.key==='Enter')pysServGuardar(${s.id})"></div>
+    <div style="font-size:11px;color:var(--muted)">
+      Este importe vale sólo para esta venta/presupuesto. No modifica el precio del servicio.</div>
+    <div id="psm-msg"></div>
+  `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+     <button class="btn" onclick="pysServGuardar(${s.id})">Agregar</button>`);
+  // Guardamos el objeto servicio para el confirm (evita meterlo en el onclick).
+  PYS_SERV_TMP = s;
+}
+let PYS_SERV_TMP = null;
+function pysServGuardar(id){
+  const s = PYS_SERV_TMP;
+  const precio = Number($('psm-precio').value)||0;
+  if(precio<=0){ $('psm-msg').innerHTML='<div class="msg error">Indicá un precio mayor a cero.</div>'; return; }
+  if(!s || s.id!==id){ closeModal(); return; }
+  nvAgregar({id:s.id, codigo:s.codigo, nombre:s.nombre,
+             precio, stock:0, tipo:'servicio', manual:true});   // precio_manual:true
+  PYS_SERV_TMP = null;
+  closeModal(); renderCart();
 }
 
 let PROD_ALIC = null;      // alícuotas de IVA, se cachean
