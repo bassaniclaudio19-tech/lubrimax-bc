@@ -2057,6 +2057,7 @@ function cmpBuscarProd(uid,q){
     const [rpc,tabla]=await Promise.all([
       sb.rpc('buscar_por_codigo',{q:term}),
       sb.from('productos').select('id,codigo,nombre,stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva')
+        .eq('activo',true)                                   // no ofrecer inactivos
         .or(`nombre.ilike.%${term}%,codigo.ilike.%${term}%`).limit(8)
     ]);
     const vistos=new Set(); const items=[];
@@ -2079,8 +2080,16 @@ async function cmpElegirProd(uid,it){
   // si no vinieron los costos (caso RPC), traerlos
   let ucn=it.ucn, ucf=it.ucf, ualic=it.ualic, stock=it.stock;
   if(ucn===undefined){
-    const {data}=await sb.from('productos').select('stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva,alicuota_iva_venta_id').eq('id',it.id).single();
-    if(data){ ucn=data.ultimo_costo_neto; ucf=data.ultimo_costo_final; ualic=data.ultima_alicuota_iva; stock=data.stock; }
+    // .eq('activo',true): si el producto está inactivo no devuelve fila y la
+    // línea queda sin vincular, en vez de entrar a la compra igual.
+    const {data}=await sb.from('productos').select('stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva,alicuota_iva_venta_id')
+      .eq('id',it.id).eq('activo',true).maybeSingle();
+    if(!data){
+      l.producto_id=null; l.texto='';
+      l.info='<span style="color:var(--danger)">Ese producto está inactivo y no puede agregarse a una compra.</span>';
+      cmpRenderLineas(); return;
+    }
+    ucn=data.ultimo_costo_neto; ucf=data.ultimo_costo_final; ualic=data.ultima_alicuota_iva; stock=data.stock;
   }
   l.info=`Stock actual: <b>${Number(stock)||0}</b> · Últ. costo neto: <b>${money(ucn||0)}</b> · Últ. costo final: <b>${money(ucf||0)}</b> · Alíc. habitual: <b>${ualic||0}%</b>`;
   // proponer costo y alícuota habituales si están vacíos
@@ -3242,7 +3251,8 @@ function trbBuscarProd(q){
   TRB_T=setTimeout(async ()=>{
     const t=q.trim();
     const {data}=await sb.from('productos').select('id,codigo,nombre,stock,precio_venta')
-      .eq('tipo','producto').or(`nombre.ilike.%${t}%,codigo.ilike.%${t}%`).limit(10);
+      .eq('tipo','producto').eq('activo',true)               // no ofrecer inactivos
+      .or(`nombre.ilike.%${t}%,codigo.ilike.%${t}%`).limit(10);
     if(!data||!data.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
     box.innerHTML=data.map(p=>`<div class="cmp-prodhit" onclick='trbElegirProd(${JSON.stringify(p).replace(/'/g,"&#39;")})'>
       <b>${p.codigo||'—'}</b> · ${p.nombre||''} <span style="color:var(--muted)">(stock ${Number(p.stock)||0} · ${money(p.precio_venta)})</span></div>`).join('');
