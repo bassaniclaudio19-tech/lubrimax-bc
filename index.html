@@ -1629,8 +1629,13 @@ async function saveVehiculo(){
     msg.innerHTML='<div class="msg error">'+m+'</div>'; return;
   }
   closeModal();
+  // Gancho de retorno opcional: si alguien (p. ej. el flujo Cliente y presupuesto)
+  // necesita volver a su pantalla en vez de ir a la ficha del cliente, lo usa una
+  // sola vez. Sin gancho, comportamiento original intacto.
+  if(typeof VEH_RETORNO==='function'){ const f=VEH_RETORNO; VEH_RETORNO=null; f(VEHF.cliente_id); return; }
   cliFicha(VEHF.cliente_id);
 }
+let VEH_RETORNO=null;
 
 // ---------- FICHA DEL VEHÍCULO ----------
 async function vehFicha(id){
@@ -3974,6 +3979,8 @@ let BUSCADOR_MODO='vehiculo';
 const BUS={tipo:null,marca:null,modelo:null,vista:'tabla'};
 let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[], BUS_FILTROS=[];
 let CART=[];
+let WEGA_CTX=[];            // contexto por fila de la tabla de aplicaciones (busTabla)
+let WEGA_CTX_ACTUAL=null;   // contexto del producto abierto en verProducto
 
 PAGES.buscador=async ()=>{
   content.innerHTML=`
@@ -4157,9 +4164,15 @@ async function busTabla(){
   if(!data||!data.length){
     box.innerHTML='<div class="panel"><div class="empty">No hay aplicaciones cargadas para ese vehículo.</div></div>'; return; }
 
-  // celda: varios códigos, uno debajo del otro, clickeables
-  const cel=(v)=>!v ? '<span class="cat-vacio">—</span>'
-    : v.split('\n').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}')">${c}</a>`).join('<br>');
+  // Registro de contexto por fila (aplicación Wega). El onclick transporta
+  // sólo el índice numérico -> el contexto viaja como dato, no como texto DOM.
+  WEGA_CTX = data.map(r=>({
+    marca: BUS.marca, modelo: r.modelo, version: r.motor,
+    anio: r.anio, anio_desde: r.anio_desde, anio_hasta: r.anio_hasta
+  }));
+  // celda: varios códigos, uno debajo del otro, clickeables. ci = índice de fila.
+  const cel=(v,ci)=>!v ? '<span class="cat-vacio">—</span>'
+    : v.split('\n').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}',${ci})">${c}</a>`).join('<br>');
   const totalProd=data.reduce((s,r)=>s+(Number(r.total)||0),0);
 
   box.innerHTML=`
@@ -4176,18 +4189,18 @@ async function busTabla(){
             <th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th>
             <th>Caja</th><th>Kits</th><th>Accesorios</th><th>Otros</th>
           </tr></thead>
-          <tbody>${data.map(r=>`<tr>
+          <tbody>${data.map((r,i)=>`<tr>
             <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
             <td data-l="Motor / versión" class="cat-motor">${r.motor||'—'}</td>
             <td data-l="Año" class="cat-anio">${r.anio||'—'}</td>
-            <td data-l="Aire">${cel(r.aire)}</td>
-            <td data-l="Aceite">${cel(r.aceite)}</td>
-            <td data-l="Combustible">${cel(r.combustible)}</td>
-            <td data-l="Habitáculo">${cel(r.habitaculo)}</td>
-            <td data-l="Caja">${cel(r.caja)}</td>
-            <td data-l="Kits">${cel(r.kits)}</td>
-            <td data-l="Accesorios">${cel(r.accesorios)}</td>
-            <td data-l="Otros">${cel(r.otros)}</td>
+            <td data-l="Aire">${cel(r.aire,i)}</td>
+            <td data-l="Aceite">${cel(r.aceite,i)}</td>
+            <td data-l="Combustible">${cel(r.combustible,i)}</td>
+            <td data-l="Habitáculo">${cel(r.habitaculo,i)}</td>
+            <td data-l="Caja">${cel(r.caja,i)}</td>
+            <td data-l="Kits">${cel(r.kits,i)}</td>
+            <td data-l="Accesorios">${cel(r.accesorios,i)}</td>
+            <td data-l="Otros">${cel(r.otros,i)}</td>
           </tr>`).join('')}</tbody>
         </table>
       </div>
@@ -4200,10 +4213,14 @@ async function busTabla(){
 }
 
 // ---- detalle de producto ----
-async function verProducto(id){
+// ctx (opcional): contexto Wega de la fila desde la que se llegó. Se guarda en
+// WEGA_CTX_ACTUAL para que el botón "Agregar" lo transporte al CART sin meter
+// un objeto dentro del onclick.
+async function verProducto(id, ctx){
   const {data:p}=await sb.from('productos')
     .select('id,codigo,nombre,descripcion,precio_venta,stock,stock_minimo,unidad,ubicacion,tipo_filtro_id').eq('id',id).single();
   if(!p) return;
+  WEGA_CTX_ACTUAL = ctx || null;
   const {data:eq}=await sb.from('equivalencias').select('marca_id,codigo').eq('producto_id',id).limit(20);
   openModal(p.codigo||'Producto',`
     <div style="font-size:15px;font-weight:600;margin-bottom:10px">${p.nombre||''}</div>
@@ -4216,11 +4233,13 @@ async function verProducto(id){
     ${eq&&eq.length?`<div class="field"><label>Equivalencias</label>
       <div style="font-size:12px;color:var(--muted);line-height:1.7">${eq.map(e=>e.codigo).join(' · ')}</div></div>`:''}
   `,`<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>
-     <button class="btn" onclick='cartAdd(${JSON.stringify({producto_id:p.id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio_venta,stock:p.stock}).replace(/'/g,"&#39;")});closeModal()'>Agregar a la venta</button>`);
+     <button class="btn" onclick='cartAdd(${JSON.stringify({producto_id:p.id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio_venta,stock:p.stock}).replace(/'/g,"&#39;")}, WEGA_CTX_ACTUAL);closeModal()'>Agregar a la venta</button>`);
 }
-async function verProductoPorCodigo(cod){
+async function verProductoPorCodigo(cod, ci){
+  // ci: índice de fila en WEGA_CTX (opcional). Resuelve el contexto de la aplicación.
+  const ctx = (ci!=null && WEGA_CTX && WEGA_CTX[ci]) ? WEGA_CTX[ci] : null;
   const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
-  if(data&&data[0]){ verProducto(data[0].id); return; }
+  if(data&&data[0]){ verProducto(data[0].id, ctx); return; }
   // La aplicación existe en el catálogo pero Lubrimax no tiene el producto.
   openModal(cod,`
     <div class="msg error" style="margin:0">No cargado en catálogo Lubrimax</div>
@@ -4233,7 +4252,9 @@ async function verProductoPorCodigo(cod){
 }
 
 // ============ CARRITO ============
-function cartAdd(r){
+// ctx (opcional): contexto Wega de la aplicación de origen. Se guarda como
+// wega_context SÓLO para el flujo de presupuesto/vehículo. crear_venta lo ignora.
+function cartAdd(r, ctx){
   const id=r.producto_id;
   const ya=CART.find(x=>x.producto_id===id);
   if(ya){ ya.cantidad++; } else {
@@ -4241,7 +4262,8 @@ function cartAdd(r){
     // productos físicos sin precio manual y sin descuento.
     CART.push({producto_id:id,codigo:r.codigo,descripcion:r.descripcion,
                precio:Number(r.precio)||0,stock:Number(r.stock)||0,cantidad:1,
-               es_servicio:false, precio_manual:false, descuento_pct:0});
+               es_servicio:false, precio_manual:false, descuento_pct:0,
+               wega_context: ctx || null});
   }
   renderCart();
 }
@@ -4256,6 +4278,7 @@ function renderCart(){
       <div><b>${CART.length}</b> producto(s) · <b style="color:var(--amber)">${money(cartTotal())}</b></div>
       <div style="display:flex;gap:8px">
         <button class="btn btn-ghost btn-sm" onclick="cartVer()">Ver selección</button>
+        <button class="btn btn-ghost btn-sm" onclick="clientePresupuesto()">Cliente y presupuesto</button>
         <button class="btn btn-sm" onclick="ventaRapida()">Crear venta</button>
       </div>
     </div>`;
@@ -4272,6 +4295,156 @@ function cartVer(){
     <div style="text-align:right;margin-top:12px;font-size:18px">Total: <b style="color:var(--amber)">${money(cartTotal())}</b></div>
   `,`<button class="btn btn-ghost" onclick="closeModal()">Seguir buscando</button>
      <button class="btn" onclick="closeModal();ventaRapida()">Crear venta</button>`);
+}
+
+// ============ CLIENTE Y PRESUPUESTO (orquestador, 100% reutiliza Presupuestos) ============
+// Estado efímero del arranque del flujo. NO es un carrito nuevo: es un puente
+// entre el CART existente y el estado PRE_NUEVO existente.
+let CP_STATE=null;
+
+// Detecta si los ítems del CART que tienen wega_context apuntan todos a la MISMA
+// aplicación. Los ítems sin wega_context (Ziel, generales) NO invalidan.
+// Devuelve: {estado:'ninguno'|'unico'|'ambiguo', ctx}
+function cpContextoUnico(){
+  const conCtx = CART.filter(l=>l.wega_context);
+  if(!conCtx.length) return {estado:'ninguno', ctx:null};
+  const clave = c => [c.marca,c.modelo,c.version,c.anio_desde??null,c.anio_hasta??null].join('¦');
+  const primera = conCtx[0].wega_context;
+  const k0 = clave(primera);
+  const todosIguales = conCtx.every(l=>clave(l.wega_context)===k0);
+  return todosIguales ? {estado:'unico', ctx:primera} : {estado:'ambiguo', ctx:null};
+}
+
+// Resuelve vehiculo_catalogo_id por coincidencia EXACTA Y ÚNICA contra
+// cat_versiones_vehiculo. Sin fuzzy, sin contains, sin normalización.
+// Devuelve {catalogo_id} o null si hay 0 o >1 coincidencias.
+async function cpResolverCatalogo(ctx){
+  if(!ctx || !ctx.marca || !ctx.modelo || !ctx.version) return null;
+  // p_tipo: el Buscador trabaja con BUS.tipo; usamos el actual como mejor referencia.
+  const {data,error}=await sb.rpc('cat_versiones_vehiculo',
+    {p_marca:ctx.marca, p_modelo:ctx.modelo, p_tipo:BUS.tipo||null});
+  if(error || !data) return null;
+  const match = data.filter(v=>
+      v.version === ctx.version
+      && v.anio_desde === ctx.anio_desde
+      && (v.anio_hasta ?? null) === (ctx.anio_hasta ?? null));
+  return match.length===1 ? {catalogo_id:match[0].catalogo_id} : null;
+}
+
+// Separa el CART en productos copiables y servicios (con avisos), sin tocar CART.
+function cpCopiarCart(){
+  const productos=[], servInvalidos=[]; let servCopiados=0;
+  const items=[];
+  CART.forEach(l=>{
+    if(l.es_servicio){
+      // Servicio: respetar la lógica de precio del módulo Presupuestos.
+      const precio=Number(l.precio)||0;
+      if(precio>0){
+        items.push({producto_id:l.producto_id, codigo:l.codigo||null,
+          descripcion:l.descripcion, cantidad:Number(l.cantidad)||1,
+          precio, es_servicio:true});
+        servCopiados++;
+      } else {
+        servInvalidos.push(l.descripcion||('#'+l.producto_id));
+      }
+    } else {
+      // Producto físico: el precio lo relee crear_presupuesto. Copia por valor.
+      items.push({producto_id:l.producto_id, codigo:l.codigo||null,
+        descripcion:l.descripcion, cantidad:Number(l.cantidad)||1,
+        precio:Number(l.precio)||0, es_servicio:false,
+        estado:Number(l.stock)>0?'disponible':'sin_stock'});
+      productos.push(l);
+    }
+  });
+  return {items, nProd:productos.length, nServ:servCopiados, servInvalidos};
+}
+
+async function clientePresupuesto(){
+  if(!CART.length){ alert('No hay productos seleccionados.'); return; }
+  const ctxInfo = cpContextoUnico();
+  let resuelto=null;
+  if(ctxInfo.estado==='unico'){ resuelto = await cpResolverCatalogo(ctxInfo.ctx); }
+  CP_STATE = {ctxInfo, resuelto};
+
+  // Arranca el flujo de Presupuestos reutilizado y copia los ítems del CART.
+  await preNuevo();
+  const copia = cpCopiarCart();
+  PRE_NUEVO.items = copia.items;      // copia por valor; CART queda intacto
+  preItems(); preTotales();
+
+  // Banner informativo dentro del presupuesto: contexto + servicios no copiados.
+  const msg=$('pre-msg'); if(!msg) return;
+  let html='';
+  if(ctxInfo.estado==='unico'){
+    const c=ctxInfo.ctx;
+    html += `<div class="msg ok" style="margin-bottom:10px">
+      <b>Vehículo detectado desde Buscador Wega</b><br>
+      Marca: ${c.marca||'—'} · Modelo: ${c.modelo||'—'} · Versión: ${c.version||'—'} · Año: ${c.anio||'—'}
+      ${resuelto?' · <span style="color:var(--ok)">versión del catálogo identificada</span>'
+                :' · <span style="color:var(--muted)">elegí la versión en el formulario de vehículo</span>'}
+      <div style="margin-top:8px">
+        <button class="btn btn-sm" onclick="cpAgregarVehiculo()">Agregar este vehículo al cliente</button>
+        <span style="font-size:11px;color:var(--muted);margin-left:8px">Primero elegí el cliente. La patente, el km y el año real los completás vos.</span>
+      </div></div>`;
+  } else if(ctxInfo.estado==='ambiguo'){
+    html += `<div class="msg error" style="margin-bottom:10px">
+      Los productos seleccionados no corresponden a una única versión de vehículo.
+      Podés continuar sin vehículo o elegir/agregar uno manualmente.</div>`;
+  }
+  if(copia.servInvalidos.length){
+    html += `<div class="msg error" style="margin-bottom:10px">
+      Hay ${copia.servInvalidos.length} servicio(s) sin precio válido que no se copiaron:
+      ${copia.servInvalidos.join(', ')}. Revisalos y agregalos con “+ Servicio”.</div>`;
+  }
+  msg.innerHTML=html;
+}
+
+// Abre el formulario de vehículo existente, precargando lo que el contexto permita.
+// Requiere que el cliente ya esté elegido en el presupuesto.
+async function cpAgregarVehiculo(){
+  if(!CP_STATE || CP_STATE.ctxInfo.estado!=='unico') return;
+  const cid = PRE_NUEVO && PRE_NUEVO.cliente_id;
+  if(!cid){
+    const msg=$('pre-msg');
+    if(msg) msg.insertAdjacentHTML('afterbegin',
+      '<div class="msg error" style="margin-bottom:10px">Elegí primero el cliente para poder cargarle el vehículo.</div>');
+    return;
+  }
+  const c = CP_STATE.ctxInfo.ctx;
+  // Si resolvimos catalogo_id y el cliente ya tiene un vehículo con ese mismo
+  // catalogo_id, sugerirlo en vez de crear un duplicado. No fusiona ni autoselecciona.
+  if(CP_STATE.resuelto){
+    const yaCargados = (window._preVehs && Object.values(window._preVehs)) || [];
+    const coincide = yaCargados.find(x=>x.vehiculo_catalogo_id===CP_STATE.resuelto.catalogo_id);
+    if(coincide){
+      const msg=$('pre-msg');
+      if(msg) msg.insertAdjacentHTML('afterbegin',
+        `<div class="msg ok" style="margin-bottom:10px">Este cliente ya tiene un vehículo compatible:
+         <b>${coincide.patente||'sin patente'} · ${[coincide.marca,coincide.modelo,coincide.version].filter(Boolean).join(' ')}</b>.
+         Elegilo en el selector de vehículo en vez de cargar uno nuevo.</div>`);
+      const sel=$('pn-veh'); if(sel){ sel.value=coincide.id; preSetVehiculo(coincide.id); }
+      return;
+    }
+  }
+  // Precarga compatible con formVehiculoCliente(cliente_id, v):
+  // marca/modelo siempre; version + vehiculo_catalogo_id sólo si hubo match exacto único.
+  // anio queda vacío: el rango (ej. "2011 →") es referencia, no año real.
+  const v = {
+    tipo_vehiculo: BUS.tipo || null,
+    marca: c.marca, modelo: c.modelo,
+    version: CP_STATE.resuelto ? c.version : null,
+    vehiculo_catalogo_id: CP_STATE.resuelto ? CP_STATE.resuelto.catalogo_id : null,
+    anio: null
+  };
+  // Al guardar, volver al presupuesto y re-seleccionar el cliente para que su
+  // vehículo recién creado aparezca en el selector, sin perder los ítems copiados.
+  const itemsPrev = PRE_NUEVO.items.slice();
+  VEH_RETORNO = async (clienteId)=>{
+    await preNuevo();
+    PRE_NUEVO.items = itemsPrev; preItems(); preTotales();
+    await preSetCliente(clienteId);
+  };
+  await formVehiculoCliente(cid, v);
 }
 
 // ============ VENTA RÁPIDA ============
