@@ -754,8 +754,10 @@ PAGES.productos = async () => {
     <div class="pys-layout">
       <div class="pys-nav" id="pys-nav"></div>
       <div class="pys-tabla" id="pys-tabla"></div>
-    </div>`;
+    </div>
+    <div id="cart-bar"></div>`;
   pysNav(); await pysTabla();
+  renderCart();
 };
 
 function pysTab(t){ PYS.tab=t; PYS.familia=null; PYS.sub=null; PYS.grupo=null; PAGES.productos(); }
@@ -831,7 +833,7 @@ async function pysTabla(){
   box.innerHTML='<div class="loading">Cargando…</div>';
 
   let q = sb.from('productos')
-    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,tipo_filtro_id,precio_venta,precio_final,stock,stock_minimo,costo,unidad,precio_venta_sugerido,margen_personalizado,ultima_alicuota_iva')
+    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,tipo_filtro_id,precio_venta,precio_final,stock,stock_minimo,costo,unidad,precio_venta_sugerido,margen_personalizado,ultima_alicuota_iva,activo')
     .eq('tipo', PYS.tab==='servicios' ? 'servicio' : 'producto')
     .order('codigo').limit(500);
 
@@ -881,6 +883,17 @@ async function pysTabla(){
                    : st<=min ? '<span class="tag warn">Reponer</span>'
                    : '<span class="tag ok">Disponible</span>';
       const sub = p.subfamilia || tfNom(p.tipo_filtro_id);
+      // Producto físico: sólo vendible con precio_venta definido.
+      // (activo=false no llega acá si el back lo filtra; igual lo respetamos si viniera.)
+      const inactivo = p.activo===false;
+      const sinPrecio = p.precio_venta==null;
+      const puedeAgregar = !inactivo && !sinPrecio;
+      const btnAgregar = puedeAgregar
+        ? `<button class="btn btn-sm" data-add="${p.id}" onclick='pysAdd(${JSON.stringify({
+              id:p.id,codigo:p.codigo,nombre:p.nombre,tipo:p.tipo,
+              precio:Number(p.precio_venta)||0,stock:Number(p.stock)||0,manual:false
+            }).replace(/'/g,"&#39;")}), this)'>Agregar</button>`
+        : `<span style="color:var(--muted);font-size:11px">${inactivo?'inactivo':'Sin precio'}</span>`;
       return `<tr>
         <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
         <td>${corto(p.nombre,56)}</td>
@@ -888,11 +901,27 @@ async function pysTabla(){
         <td class="cmp-num">${precio(p)}</td>
         <td class="cmp-num">${st}</td>
         <td>${estado}</td>
-        <td><button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
+        <td style="white-space:nowrap;display:flex;gap:6px;justify-content:flex-end">
+          ${btnAgregar}
+          <button class="btn btn-ghost btn-sm" onclick='formProducto(${JSON.stringify(p).replace(/'/g,"&#39;")})'>Editar</button></td>
       </tr>`;
     }).join('');
   }
   box.innerHTML = tableShell(titulo, heads, rows);
+  renderCart();   // refresca la barra de venta en curso si ya hay CART
+}
+
+// Agrega un producto al MISMO CART reutilizando nvAgregar().
+// No abre venta, no toca Supabase: sólo forma la venta en curso.
+function pysAdd(p, btn){
+  nvAgregar(p);                 // empuja al CART / suma cantidad (misma lógica que Nueva Venta)
+  renderCart();                 // muestra/actualiza la barra flotante en esta pantalla
+  if(btn){                      // feedback visible, sin alert()
+    const prev = btn.textContent;
+    btn.textContent = 'Agregado ✓';
+    btn.disabled = true;
+    setTimeout(()=>{ btn.textContent = prev; btn.disabled = false; }, 900);
+  }
 }
 
 let PROD_ALIC = null;      // alícuotas de IVA, se cachean
