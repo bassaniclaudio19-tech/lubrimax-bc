@@ -1010,10 +1010,16 @@ async function formProducto(p){
   const esServicio = p.tipo === 'servicio';
   const ivaCompra = Number(p.ultima_alicuota_iva) > 0 ? Number(p.ultima_alicuota_iva) : 21;
 
+  // Familias activas (desde PYS.familias, cargado en PAGES.productos). "Filtros
+  // Wega" se detecta por nombre, sin hardcodear id.
+  const famActivas = (PYS.familias||[]).filter(f=>f.activo!==false);
+  const esFamWega = f => f && /wega/i.test(f.nombre||'');
+  const famWegaId = (famActivas.find(esFamWega)||{}).id;
+
   openModal(p.id ? 'Editar producto' : 'Nuevo producto', `
     <div class="row2">
       <div class="field"><label>Tipo</label>
-        <select id="f-tipo" onchange="prodPreview()">
+        <select id="f-tipo" onchange="prodPreview();prodFamToggle()">
           <option value="producto" ${p.tipo!=='servicio'?'selected':''}>Producto</option>
           <option value="servicio" ${esServicio?'selected':''}>Servicio</option>
         </select></div>
@@ -1021,6 +1027,19 @@ async function formProducto(p){
     </div>
     <div class="field"><label>Código *</label><input id="f-codigo" value="${p.codigo||''}"></div>
     <div class="field"><label>Nombre *</label><input id="f-nombre" value="${(p.nombre||'').replace(/"/g,'&quot;')}"></div>
+
+    <div class="row2">
+      <div class="field" id="f-fam-w"><label>Familia <span id="f-fam-req">*</span></label>
+        <select id="f-fam" data-wega="${famWegaId!=null?famWegaId:''}" onchange="prodFamToggle()">
+          <option value="">— elegí una familia —</option>
+          ${famActivas.map(f=>`<option value="${f.id}" ${Number(p.familia_id)===f.id?'selected':''}>${f.nombre}</option>`).join('')}
+        </select></div>
+      <div class="field" id="f-tf-w" style="display:none"><label>Tipo de filtro *</label>
+        <select id="f-tf">
+          <option value="">— elegí el tipo —</option>
+          ${(PYS.tipos||[]).map(t=>`<option value="${t.id}" ${Number(p.tipo_filtro_id)===t.id?'selected':''}>${t.nombre}</option>`).join('')}
+        </select></div>
+    </div>
 
     <div class="prod-sec">Costo</div>
     <div class="row2">
@@ -1066,6 +1085,23 @@ async function formProducto(p){
   `, `<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
       <button class="btn" id="f-ok" onclick="saveProducto(${p.id||'null'})">Guardar</button>`);
   prodPreview();
+  prodFamToggle();
+}
+
+// Muestra Familia sólo para productos (los servicios mantienen el comportamiento
+// actual: sin familia obligatoria). Muestra Tipo de filtro sólo cuando la familia
+// elegida es la de Wega; al salir de Wega, limpia el tipo para no arrastrarlo.
+function prodFamToggle(){
+  const tipo = $('f-tipo') ? $('f-tipo').value : 'producto';
+  const esServ = tipo==='servicio';
+  const famW = $('f-fam-w'), tfW = $('f-tf-w'), fam = $('f-fam'), tf = $('f-tf');
+  // Familia: visible y obligatoria sólo para productos.
+  if(famW) famW.style.display = esServ ? 'none' : '';
+  // Tipo de filtro: sólo si la familia seleccionada es la de Wega.
+  const wegaId = fam ? fam.dataset.wega : '';
+  const esWega = !esServ && fam && wegaId!=='' && fam.value===wegaId;
+  if(tfW) tfW.style.display = esWega ? '' : 'none';
+  if(!esWega && tf) tf.value = '';   // no conservar tipo de filtro fuera de Wega
 }
 
 function prodMargenGeneral(){
@@ -1107,6 +1143,20 @@ async function saveProducto(id){
   const nombre=$('f-nombre').value.trim();
   if(!codigo){ set('El código es obligatorio.','error'); return; }
   if(!nombre){ set('El nombre es obligatorio.','error'); return; }
+
+  const tipo = $('f-tipo').value;
+  const famEl = $('f-fam');
+  const famId = famEl && famEl.value!=='' ? Number(famEl.value) : null;
+  const wegaId = famEl ? famEl.dataset.wega : '';
+  const esWega = tipo!=='servicio' && famEl && wegaId!=='' && famEl.value===wegaId;
+  const tfEl = $('f-tf');
+  const tfId = esWega && tfEl && tfEl.value!=='' ? Number(tfEl.value) : null;
+
+  // Familia obligatoria para productos (los servicios mantienen el comportamiento actual).
+  if(tipo!=='servicio' && famId===null){ set('Elegí la familia del producto.','error'); return; }
+  // Tipo de filtro obligatorio para productos Wega.
+  if(esWega && tfId===null){ set('Elegí el tipo de filtro.','error'); return; }
+
   const mTxt=$('f-margen').value.trim();
 
   const btn=$('f-ok'); if(btn) btn.disabled=true;
@@ -1117,13 +1167,15 @@ async function saveProducto(id){
     p_id: id,
     p_codigo: codigo,
     p_nombre: nombre,
-    p_tipo: $('f-tipo').value,
+    p_tipo: tipo,
     p_unidad: $('f-unidad').value.trim()||'unidad',
     p_costo: Number($('f-costo').value)||0,
     p_alicuota_iva: Number($('f-iva').value)||21,
     p_margen_personalizado: mTxt===''? null : Number(mTxt),
     p_stock_minimo: Number($('f-min').value)||0,
-    p_precio_venta_sugerido: $('f-wega').value.trim()===''? null : Number($('f-wega').value)
+    p_precio_venta_sugerido: $('f-wega').value.trim()===''? null : Number($('f-wega').value),
+    p_familia_id: famId,
+    p_tipo_filtro_id: tfId
   });
   if(error){
     if(btn) btn.disabled=false;
