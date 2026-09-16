@@ -2838,8 +2838,15 @@ async function preGuardar(){
   const {data,error}=await sb.rpc('crear_presupuesto',{
     p_cliente_id:PRE_NUEVO.cliente_id,
     p_vehiculo_id:PRE_NUEVO.vehiculo_id,
-    p_items:PRE_NUEVO.items.map(l=>({producto_id:l.producto_id, cantidad:l.cantidad,
-        precio_unitario:l.es_servicio?l.precio:null, descripcion:l.descripcion})),
+    p_items:PRE_NUEVO.items.map(l=>{
+        const it={producto_id:l.producto_id, cantidad:l.cantidad,
+          precio_unitario:l.es_servicio?l.precio:null, descripcion:l.descripcion};
+        // Producto con precio editado por Admin: override explícito de operación.
+        if(!l.es_servicio && l.override){
+          it.override_precio=true; it.precio_override=Number(l.precio); it.descuento_pct=0;
+        }
+        return it;
+      }),
     p_descuento_pct:Number($('pn-desc').value)||0,
     p_tipo_comprobante_id:Number($('pn-comp').value)||null,
     p_alicuota_iva_id:Number($('pn-alic').value)||null,
@@ -3071,11 +3078,31 @@ function nvAgregar(p){
   nvCarrito(); renderCart();
 }
 
-function nvSet(id, campo, v){
-  const l=CART.find(x=>x.producto_id===id); if(!l) return;
+// Helper único de mutación de una línea del CART. Lo usan tanto la grilla de
+// Nueva venta (nvSet) como el modal de Venta rápida (vrSet). NO escribe jamás
+// en productos: sólo modifica el objeto en memoria del CART.
+function cartEditarLinea(id, campo, v){
+  const l=CART.find(x=>x.producto_id===id); if(!l) return null;
   if(campo==='cantidad')  l.cantidad = Math.max(1, Number(v)||1);
-  if(campo==='descuento') l.descuento_pct = Math.min(100, Math.max(0, Number(v)||0));
-  if(campo==='precio')    l.precio = Math.max(0, Number(v)||0);
+  if(campo==='descuento'){
+    // El descuento de línea y el precio manual son mutuamente excluyentes (XOR).
+    l.descuento_pct = Math.min(100, Math.max(0, Number(v)||0));
+    if(l.descuento_pct>0 && l.override){ l.override=false; }
+  }
+  if(campo==='precio'){
+    l.precio = Math.max(0, Number(v)||0);
+    // Editar el precio de un PRODUCTO (no servicio) es un override de operación.
+    // Servicios: conservan su comportamiento actual (precio_manual), sin override.
+    if(!l.es_servicio){
+      l.override = true;
+      l.descuento_pct = 0;   // XOR: override anula el descuento de línea
+    }
+  }
+  return l;
+}
+
+function nvSet(id, campo, v){
+  if(!cartEditarLinea(id, campo, v)) return;
   nvCarrito(); renderCart();
 }
 function nvQuitar(id){ cartDel(id); nvCarrito(); }
@@ -3111,11 +3138,13 @@ function nvCarrito(){
               <div style="font-size:11px;color:var(--muted)">${corto(l.descripcion||'',44)}</div></td>
           <td><input type="number" min="1" value="${l.cantidad}"
                      onchange="nvSet(${l.producto_id},'cantidad',this.value)"></td>
-          <td>${l.precio_manual
+          <td>${(l.precio_manual || (!l.es_servicio && esAdmin()))
                 ? `<input type="number" min="0" step="0.01" value="${l.precio||''}" placeholder="importe"
-                          onchange="nvSet(${l.producto_id},'precio',this.value)">`
+                          onchange="nvSet(${l.producto_id},'precio',this.value)">
+                   ${l.override?'<div style="font-size:10px;color:var(--amber)">precio manual</div>':''}`
                 : `<span style="font-size:13px">${money(l.precio)}</span>`}</td>
           <td><input type="number" min="0" max="100" step="0.01" value="${d}"
+                     ${l.override?'disabled title="Precio manual activo: sin descuento de línea"':''}
                      onchange="nvSet(${l.producto_id},'descuento',this.value)"></td>
           <td class="cmp-num">${money(sub)}</td>
           <td><button class="cmp-delrow" onclick="nvQuitar(${l.producto_id})">×</button></td>
@@ -4601,13 +4630,54 @@ async function ventaRapida(){
     </div>
     <div class="field"><label>Alícuota IVA</label>
       <select id="vr-alic">${VR_ALI.map(x=>`<option value="${x.id}" ${a21&&x.id===a21.id?'selected':''}>${x.nombre}</option>`).join('')}</select></div>
-    <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px">
-      ${CART.length} producto(s) — Total estimado <b style="color:var(--amber)">${money(cartTotal())}</b>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
-    </div>
+    <div id="vr-lineas"></div>
   `,`<button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
      <button class="btn" id="vr-ok" onclick="vrGuardar()">Registrar venta</button>`);
   vrToggle();
+  vrLineas();
+}
+
+// Grilla de líneas dentro del modal de Venta rápida. Edita el MISMO CART
+// (sin copiar) y permite al Admin cambiar el precio unitario de un producto
+// antes de confirmar. Reutiliza cartEditarLinea() — no duplica nvSet().
+function vrLineas(){
+  const box=$('vr-lineas'); if(!box) return;
+  const editable = esAdmin();
+  box.innerHTML = `
+    <div style="background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px">
+      <table class="cmp-lines" style="width:100%"><thead><tr>
+        <th>Producto</th><th style="width:70px">Cant.</th>
+        <th style="width:120px">Precio unit.</th><th class="cmp-num">Subtotal</th></tr></thead><tbody>
+      ${CART.map(l=>{
+        const d=Number(l.descuento_pct)||0;
+        const sub=(Number(l.precio)||0)*(1-d/100)*l.cantidad;
+        const editablePrecio = editable && !l.es_servicio;
+        return `<tr>
+          <td><b style="color:var(--amber)">${l.codigo||''}</b>
+              ${l.es_servicio?' <span class="tag warn">servicio</span>':''}
+              <div style="font-size:11px;color:var(--muted)">${corto(l.descripcion||'',36)}</div></td>
+          <td>${l.cantidad}</td>
+          <td>${(editablePrecio || (l.es_servicio && l.precio_manual))
+                ? `<input type="number" min="0" step="0.01" value="${l.precio||''}" placeholder="importe"
+                          onchange="vrSet(${l.producto_id},'precio',this.value)">
+                   ${l.override?'<div style="font-size:10px;color:var(--amber)">precio manual</div>':''}`
+                : `<span style="font-size:13px">${money(l.precio)}</span>`}</td>
+          <td class="cmp-num">${money(sub)}</td>
+        </tr>`;
+      }).join('')}</tbody></table>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
+        <span>${CART.length} ítem(s)</span>
+        <span>Total estimado <b style="color:var(--amber)">${money(nvTotal())}</b></span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
+    </div>`;
+}
+
+// Edición desde el modal de Venta rápida: reutiliza el helper compartido y
+// re-renderiza sólo la grilla del modal (el CART es el mismo objeto global).
+function vrSet(id, campo, v){
+  if(!cartEditarLinea(id, campo, v)) return;
+  vrLineas();
 }
 function vrToggle(){
   const cond=$('vr-cond'), cw=$('vr-caja-w'), f=$('vr-fact'), pw=$('vr-comp-w');
@@ -4650,6 +4720,13 @@ async function vrGuardar(){
     const it = {producto_id:l.producto_id, cantidad:l.cantidad,
                 descuento_pct: Number(l.descuento_pct)||0};
     if(l.es_servicio && l.precio_manual) it.precio_manual = Number(l.precio);
+    // Producto con precio editado por Admin: override explícito de operación.
+    // El servidor valida rol y XOR; el maestro nunca se toca.
+    if(!l.es_servicio && l.override){
+      it.override_precio = true;
+      it.precio_override = Number(l.precio);
+      it.descuento_pct = 0;   // XOR
+    }
     return it;
   });
 
