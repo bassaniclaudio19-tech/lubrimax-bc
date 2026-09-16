@@ -3364,18 +3364,43 @@ function trbPintarItems(items, cerrado){
   const box=$('trb-items'); if(!box) return;
   if(!items.length){ box.innerHTML='<div class="empty" style="padding:24px">Todavía no cargaste servicios ni productos.</div>'; return; }
   box.innerHTML=`<table class="cmp-lines"><thead><tr>
-      <th>Detalle</th><th style="width:12%">Tipo</th><th style="width:10%" class="cmp-num">Cant.</th>
-      <th style="width:15%" class="cmp-num">Precio</th><th style="width:15%" class="cmp-num">Subtotal</th><th style="width:5%"></th>
+      <th>Detalle</th><th style="width:10%">Tipo</th><th style="width:9%" class="cmp-num">Cant.</th>
+      <th style="width:13%" class="cmp-num">Precio lista</th><th style="width:14%" class="cmp-num">Precio unit.</th>
+      <th style="width:13%" class="cmp-num">Subtotal</th><th style="width:5%"></th>
     </tr></thead><tbody>
-    ${items.map(i=>`<tr>
+    ${items.map(i=>{
+      const manual = i.precio_manual;
+      const listaTxt = (i.precio_lista==null) ? '—' : money(i.precio_lista);
+      return `<tr>
       <td>${i.codigo?`<b style="color:var(--amber)">${i.codigo}</b> · `:''}${i.descripcion||''}
         ${!i.es_servicio && Number(i.stock)<=0?' <span class="tag pend">sin stock</span>':''}</td>
       <td>${i.es_servicio?'<span class="tag warn">Servicio</span>':'<span class="tag ok">Producto</span>'}</td>
-      <td class="cmp-num">${Number(i.cantidad)}</td>
-      <td class="cmp-num">${money(i.precio_unitario)}</td>
+      <td class="cmp-num">${cerrado
+          ? Number(i.cantidad)
+          : `<input type="number" min="1" step="1" value="${Number(i.cantidad)}" style="width:64px"
+                    onchange="trbEditItem(${i.item_id},'cantidad',this.value)">`}</td>
+      <td class="cmp-num">${listaTxt}</td>
+      <td class="cmp-num">${cerrado
+          ? money(i.precio_unitario)
+          : `<input type="number" min="0" step="0.01" value="${Number(i.precio_unitario)}" style="width:96px"
+                    onchange="trbEditItem(${i.item_id},'precio',this.value)">
+             ${manual?'<div style="font-size:10px;color:var(--amber)">precio manual</div>':''}`}</td>
       <td class="cmp-num" style="font-weight:600">${money(i.subtotal)}</td>
       <td>${cerrado?'':`<button class="cmp-delrow" onclick="trbDelItem(${i.item_id})">×</button>`}</td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`;}).join('')}</tbody></table>`;
+}
+
+// Edición inline de un ítem de trabajo vía RPC (admin y empleado).
+// Editar el precio de un producto = override manual (precio_manual=true).
+async function trbEditItem(item_id, campo, v){
+  const val=Number(v)||0;
+  const args={p_item_id:item_id, p_cantidad:null, p_override_precio:false, p_precio_override:null, p_descuento_pct:null};
+  if(campo==='cantidad'){ args.p_cantidad=Math.max(1,val); }
+  if(campo==='precio'){ args.p_override_precio=true; args.p_precio_override=val; }
+  const {error}=await sb.rpc('editar_trabajo_item',args);
+  const m=$('trb-msg');
+  if(error){ if(m){ m.innerHTML='<div class="msg error">'+error.message+'</div>'; } return; }
+  trbFicha(TRB_ACTUAL.id);
 }
 
 async function trbCambiarEstado(id,estado){
@@ -3386,7 +3411,8 @@ async function trbCambiarEstado(id,estado){
   setTimeout(()=>{ m.innerHTML=''; },1500);
 }
 async function trbDelItem(item_id){
-  await sb.from('trabajo_items').delete().eq('id',item_id);
+  const {error}=await sb.rpc('eliminar_trabajo_item',{p_item_id:item_id});
+  if(error){ const m=$('trb-msg'); if(m){ m.innerHTML='<div class="msg error">'+error.message+'</div>'; } return; }
   trbFicha(TRB_ACTUAL.id);
 }
 
@@ -3468,8 +3494,24 @@ async function trbSaveItem(es_servicio){
   if(!producto_id){ $(pref+'-msg').innerHTML='<div class="msg error">Elegí un producto.</div>'; return; }
   const cantidad=Number($(pref+'-cant').value)||1;
   const precio=Number($(pref+'-precio').value)||0;
-  const {error}=await sb.from('trabajo_items').insert({
-    trabajo_id:TRB_ACTUAL.id, producto_id, cantidad, precio_unitario:precio, es_servicio
+  // Distinguir "precio de lista sin tocar" de "precio editado (override)".
+  // Producto: override sólo si el importe difiere del precio de lista precargado.
+  // Servicio: el importe siempre viaja como override (no tienen precio de lista).
+  let override=false, precioOv=null;
+  if(es_servicio){
+    override = precio>0; precioOv = precio>0 ? precio : null;
+  } else {
+    const lista = window._trbProd ? (Number(window._trbProd.precio_venta)||0) : 0;
+    if(precio>0 && Math.abs(precio - lista) > 0.001){ override=true; precioOv=precio; }
+  }
+  const {error}=await sb.rpc('agregar_trabajo_item',{
+    p_trabajo_id:TRB_ACTUAL.id,
+    p_producto_id:producto_id,
+    p_cantidad:cantidad,
+    p_override_precio: override,
+    p_precio_override: precioOv,
+    p_descuento_pct: 0,
+    p_descripcion: null
   });
   if(error){ $(pref+'-msg').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
   closeModal(); trbFicha(TRB_ACTUAL.id);
@@ -3594,16 +3636,22 @@ async function trbAgregarSugeridos(){
   // Sólo lo tildado. Nada se agrega automáticamente al abrir el modal.
   const marcados=[...document.querySelectorAll('.fil-chk:checked:not(:disabled)')];
   if(!marcados.length){ closeModal(); return; }
-  const vistos={}; const filas=[];
+  const vistos={}; const ids=[];
   marcados.forEach(c=>{
     const id=Number(c.value); if(!id || vistos[id]) return;   // sin duplicados
-    vistos[id]=true;
-    filas.push({trabajo_id:TRB_ACTUAL.id, producto_id:id,
-                cantidad:1, precio_unitario:Number(c.dataset.precio)||0, es_servicio:false});
+    vistos[id]=true; ids.push(id);
   });
-  if(!filas.length){ closeModal(); return; }
-  const {error}=await sb.from('trabajo_items').insert(filas);
-  if(error){ alert(error.message); return; }
+  if(!ids.length){ closeModal(); return; }
+  // Se agregan a precio de lista: la RPC captura precio_lista del maestro.
+  const errores=[];
+  for(const id of ids){
+    const {error}=await sb.rpc('agregar_trabajo_item',{
+      p_trabajo_id:TRB_ACTUAL.id, p_producto_id:id, p_cantidad:1,
+      p_override_precio:false, p_precio_override:null, p_descuento_pct:0, p_descripcion:null
+    });
+    if(error) errores.push(error.message);
+  }
+  if(errores.length){ alert('Algunos ítems no se agregaron:\n'+errores.join('\n')); }
   closeModal(); trbFicha(TRB_ACTUAL.id);
 }
 
