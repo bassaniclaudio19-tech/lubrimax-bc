@@ -522,7 +522,14 @@ select:disabled{opacity:.5}
       <div class="field"><label>Email</label><input id="li-email" type="email" placeholder="usuario@lubrimax.com"></div>
       <div class="field"><label>Contraseña</label><input id="li-pass" type="password" placeholder="••••••••"></div>
       <button class="btn-primary" onclick="doLogin()">Ingresar</button>
+      <div class="login-switch"><a onclick="showForgot()">¿Olvidaste tu contraseña?</a></div>
       <div class="login-switch">¿No tenés cuenta? <a onclick="showRegister()">Registrate</a></div>
+    </div>
+
+    <div id="formForgot" style="display:none">
+      <div class="field"><label>Email</label><input id="fg-email" type="email" placeholder="usuario@lubrimax.com"></div>
+      <button class="btn-primary" id="fg-btn" onclick="doForgotPassword()">Enviar enlace de recuperación</button>
+      <div class="login-switch"><a onclick="showLogin()">Volver al ingreso</a></div>
     </div>
 
     <div id="formRegister" style="display:none">
@@ -602,8 +609,39 @@ const MENU = [
 // ============ AUTH ============
 const loginMsg = document.getElementById('loginMsg');
 function msg(el,text,type){el.innerHTML = text?`<div class="msg ${type}">${text}</div>`:''; }
-function showRegister(){document.getElementById('formLogin').style.display='none';document.getElementById('formRegister').style.display='block';msg(loginMsg,'');}
-function showLogin(){document.getElementById('formRegister').style.display='none';document.getElementById('formLogin').style.display='block';msg(loginMsg,'');}
+function showRegister(){document.getElementById('formLogin').style.display='none';document.getElementById('formForgot').style.display='none';document.getElementById('formRegister').style.display='block';msg(loginMsg,'');}
+function showLogin(){document.getElementById('formRegister').style.display='none';document.getElementById('formForgot').style.display='none';document.getElementById('formLogin').style.display='block';msg(loginMsg,'');}
+function showForgot(){document.getElementById('formLogin').style.display='none';document.getElementById('formRegister').style.display='none';document.getElementById('formForgot').style.display='block';msg(loginMsg,'');}
+
+// Enviar email de recuperación. El enlace vuelve a la URL de producción, donde
+// el flujo PASSWORD_RECOVERY ya existente muestra el formulario de nueva contraseña.
+let FORGOT_EN_CURSO=false;
+async function doForgotPassword(){
+  if(FORGOT_EN_CURSO) return;               // evita envíos múltiples
+  const email=document.getElementById('fg-email').value.trim();
+  // validación mínima de formato de email
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    msg(loginMsg,'Ingresá un email válido.','error'); return;
+  }
+  const btn=document.getElementById('fg-btn');
+  FORGOT_EN_CURSO=true; if(btn){ btn.disabled=true; btn.textContent='Enviando…'; }
+  try{
+    const {error}=await sb.auth.resetPasswordForEmail(email,{
+      redirectTo:'https://app.lubrimaxbc.com'
+    });
+    if(error){
+      // no romper el login: mostrar el error (incluye rate limit) y permitir reintento
+      msg(loginMsg, error.message || 'No se pudo enviar el correo. Probá más tarde.', 'error');
+    } else {
+      // mensaje neutro (no revela si el email existe o no)
+      msg(loginMsg,'Si el email está registrado, te enviamos un enlace para restablecer la contraseña. Revisá tu correo.','ok');
+    }
+  }catch(e){
+    msg(loginMsg,'No se pudo enviar el correo. Probá más tarde.','error');
+  }finally{
+    FORGOT_EN_CURSO=false; if(btn){ btn.disabled=false; btn.textContent='Enviar enlace de recuperación'; }
+  }
+}
 
 async function doRegister(){
   const nombre=document.getElementById('rg-nombre').value.trim(),
@@ -644,6 +682,7 @@ function mostrarFormRecovery(){
   document.getElementById('app').style.display='none';
   document.getElementById('formLogin').style.display='none';
   document.getElementById('formRegister').style.display='none';
+  const fg=document.getElementById('formForgot'); if(fg) fg.style.display='none';
   document.getElementById('formRecovery').style.display='block';
   msg(loginMsg,'Elegí una nueva contraseña para tu cuenta.','ok');
 }
