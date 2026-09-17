@@ -532,6 +532,12 @@ select:disabled{opacity:.5}
       <button class="btn-primary" onclick="doRegister()">Crear cuenta</button>
       <div class="login-switch">¿Ya tenés cuenta? <a onclick="showLogin()">Ingresá</a></div>
     </div>
+
+    <div id="formRecovery" style="display:none">
+      <div class="field"><label>Nueva contraseña</label><input id="rc-pass" type="password" placeholder="mínimo 6 caracteres"></div>
+      <div class="field"><label>Repetir contraseña</label><input id="rc-pass2" type="password" placeholder="repetí la contraseña"></div>
+      <button class="btn-primary" onclick="doSetNewPassword()">Guardar contraseña</button>
+    </div>
   </div>
 </div>
 
@@ -620,11 +626,58 @@ async function doLogin(){
 }
 async function doLogout(){await sb.auth.signOut();}
 
+// ============ RECUPERACIÓN DE CONTRASEÑA ============
+// Detectar el contexto de recovery ANTES de que cualquier evento de Auth
+// pueda llamar a enterApp(). El link del email trae "type=recovery" en el
+// hash de la URL; lo leemos al cargar, de modo que INITIAL_SESSION (que
+// puede llegar con session.user antes de PASSWORD_RECOVERY) nunca entre al Panel.
+let MODO_RECOVERY = (function(){
+  try {
+    const h = window.location.hash || '';
+    const q = window.location.search || '';
+    return /type=recovery/.test(h) || /type=recovery/.test(q);
+  } catch(e){ return false; }
+})();
+
+function mostrarFormRecovery(){
+  document.getElementById('login').style.display='flex';
+  document.getElementById('app').style.display='none';
+  document.getElementById('formLogin').style.display='none';
+  document.getElementById('formRegister').style.display='none';
+  document.getElementById('formRecovery').style.display='block';
+  msg(loginMsg,'Elegí una nueva contraseña para tu cuenta.','ok');
+}
+
+async function doSetNewPassword(){
+  const p1=document.getElementById('rc-pass').value;
+  const p2=document.getElementById('rc-pass2').value;
+  if(p1.length<6){ msg(loginMsg,'La contraseña debe tener al menos 6 caracteres.','error'); return; }
+  if(p1!==p2){ msg(loginMsg,'Las contraseñas no coinciden.','error'); return; }
+  const {error}=await sb.auth.updateUser({password:p1});
+  if(error){ msg(loginMsg,error.message,'error'); return; }
+  // Éxito: salir del modo recuperación ANTES del signOut, para que el evento
+  // SIGNED_OUT siga el flujo normal (login) y no vuelva a la rama de recovery.
+  MODO_RECOVERY=false;
+  await sb.auth.signOut();
+  // limpiar el hash de recovery de la URL para no re-disparar el flujo
+  try { history.replaceState(null,'',window.location.pathname); } catch(e){}
+  document.getElementById('formRecovery').style.display='none';
+  document.getElementById('formLogin').style.display='block';
+  msg(loginMsg,'Contraseña actualizada. Ingresá con tu nueva contraseña.','ok');
+}
+
 // La app entra UNA sola vez. Supabase dispara este evento también al refrescar
 // el token (por ejemplo al volver a la pestaña); si en ese caso se llamara a
 // enterApp() se perdería la pantalla en la que estaba el usuario.
 let APP_INICIADA=false;
-sb.auth.onAuthStateChange(async (_e,session)=>{
+sb.auth.onAuthStateChange(async (evento,session)=>{
+  // Flujo de recuperación: nunca entrar al Panel. Se detecta por el evento
+  // PASSWORD_RECOVERY o por el contexto de la URL (guarda contra INITIAL_SESSION).
+  if(evento==='PASSWORD_RECOVERY' || MODO_RECOVERY){
+    currentUser=session?.user||null;
+    mostrarFormRecovery();
+    return;
+  }
   if(session?.user){
     currentUser=session.user;
     if(!APP_INICIADA){ await loadProfile(); enterApp(); APP_INICIADA=true; }
