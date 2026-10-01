@@ -755,6 +755,10 @@ function go(id){
 // ============ HELPERS ============
 const $=(id)=>document.getElementById(id);
 const money=(n)=>'$'+(Number(n)||0).toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+// Escapes para inyectar texto de WEGA en HTML/atributos sin romper el markup.
+// esc: HTML seguro (texto y atributos con comillas dobles). escJs: dentro de '…' en onclick.
+const esc=(s)=>String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const escJs=(s)=>String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\r?\n/g,' ');
 const esAdmin=()=>!!(currentProfile && currentProfile.rol==='admin');
 function loading(){content.innerHTML='<div class="loading">Cargando…</div>';}
 function tableShell(title,cols,rowsHtml,addBtn){
@@ -4275,11 +4279,19 @@ async function usrGuardar(id){
 }
 
 // ----- BUSCADOR (por vehículo o por código) -----
+// v3 — Catálogo servido por la CAPA ESPEJO WEGA (wega_catalogo_fila/_codigo) vía
+// RPC cat_wega_*. Principio: 1 fila de wega_catalogo_fila = 1 renglón. No se
+// normaliza, deduplica, fusiona, corrige ni reconstruye. La navegación viaja por
+// IDs WEGA (no por comparación de texto). `productos` SOLO enriquece (precio/stock/
+// ubicación/equivalencias); nunca decide si un código WEGA aparece.
 let BUSCADOR_MODO='vehiculo';
-const BUS={tipo:null,marca:null,modelo:null,vista:'tabla'};
-let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[], BUS_FILTROS=[];
+// BUS guarda IDs WEGA + labels literales. vista: 'tabla' | 'ficha'.
+const BUS={tipoId:null,tipo:null,marcaId:null,marca:null,modeloId:null,modelo:null,vista:'tabla'};
+let BUS_TIPOS=null, BUS_MARCAS=[], BUS_MODELOS=[];
+let BUS_CAT=[];             // filas del espejo devueltas por cat_wega_catalogo (1 por <tr>)
+let BUS_FILTROS=[];         // aplanado de códigos comerciales (para "Agregar todos")
 let CART=[];
-let WEGA_CTX=[];            // contexto por fila de la tabla de aplicaciones (busTabla)
+let WEGA_CTX=[];            // contexto por fila del catálogo (índice -> datos de la fila WEGA)
 let WEGA_CTX_ACTUAL=null;   // contexto del producto abierto en verProducto
 
 PAGES.buscador=async ()=>{
@@ -4304,9 +4316,9 @@ function setModo(m){
   if(m==='vehiculo') formVehiculo(); else formCodigo();
 }
 
-// ============ MODO VEHÍCULO: TIPO > MARCA > MODELO ============
-// Al elegir el modelo se muestran TODAS sus aplicaciones.
-// No hay selector de motor: el motor es un dato de cada aplicación.
+// ============ MODO VEHÍCULO: TIPO > MARCA > MODELO (por IDs WEGA) ============
+// Al elegir el modelo se muestran TODAS sus filas WEGA, cada una como renglón propio.
+// No hay selector de motor ni de año: son datos de cada fila.
 async function formVehiculo(){
   $('bform').innerHTML=`
     <div class="bus-grid3">
@@ -4332,59 +4344,65 @@ async function formVehiculo(){
       <button class="btn btn-ghost btn-sm" onclick="busLimpiar()">Limpiar</button>
     </div>`;
   if(!BUS_TIPOS){
-    const {data,error}=await sb.rpc('cat_tipos');
+    const {data,error}=await sb.rpc('cat_wega_tipos');
     if(error){ $('bform').innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
     BUS_TIPOS=data||[];
   }
   $('bus-tipo').innerHTML='<option value="">Seleccionar tipo de vehículo</option>'+
-    BUS_TIPOS.map(t=>`<option value="${(t.tipo||'').replace(/"/g,'&quot;')}" ${BUS.tipo===t.tipo?'selected':''}>${t.tipo}</option>`).join('');
-  if(BUS.tipo) await busCargarMarcas(true);
+    BUS_TIPOS.map(t=>`<option value="${t.wega_tipo_id}" ${BUS.tipoId===t.wega_tipo_id?'selected':''}>${esc(t.tipo)}</option>`).join('');
+  if(BUS.tipoId!=null) await busCargarMarcas(true);
   busInfo();
 }
 
 async function busSetTipo(v){
-  BUS.tipo = v || null;
-  BUS.marca=null; BUS.modelo=null;
-  BUS_MARCAS=[]; BUS_MODELOS=[]; BUS_FILTROS=[];
+  const id = v==='' ? null : Number(v);
+  BUS.tipoId = id;
+  BUS.tipo = id==null ? null : (BUS_TIPOS.find(t=>t.wega_tipo_id===id)||{}).tipo;
+  BUS.marcaId=null; BUS.marca=null; BUS.modeloId=null; BUS.modelo=null;
+  BUS_MARCAS=[]; BUS_MODELOS=[]; BUS_FILTROS=[]; BUS_CAT=[];
   $('bres').innerHTML='';
   busResetSelect('bus-modelo','Seleccionar modelo', true);
-  if(!BUS.tipo){ busResetSelect('bus-marca','Seleccionar marca', true); busInfo(); return; }
+  if(BUS.tipoId==null){ busResetSelect('bus-marca','Seleccionar marca', true); busInfo(); return; }
   await busCargarMarcas(false);
   busInfo();
 }
 async function busCargarMarcas(mantener){
   const s=$('bus-marca'); if(!s) return;
   s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
-  const {data}=await sb.rpc('cat_marcas',{p_tipo:BUS.tipo});
+  const {data}=await sb.rpc('cat_wega_marcas',{p_tipo_id:BUS.tipoId});
   BUS_MARCAS=data||[];
   s.innerHTML='<option value="">Seleccionar marca</option>'+
-    BUS_MARCAS.map(m=>`<option value="${m.marca.replace(/"/g,'&quot;')}" ${mantener&&BUS.marca===m.marca?'selected':''}>${m.marca}</option>`).join('');
+    BUS_MARCAS.map(m=>`<option value="${m.wega_marca_id}" ${mantener&&BUS.marcaId===m.wega_marca_id?'selected':''}>${esc(m.marca)}</option>`).join('');
   s.disabled=false;
-  if(mantener && BUS.marca) await busCargarModelos(true);
+  if(mantener && BUS.marcaId!=null) await busCargarModelos(true);
 }
 
 async function busSetMarca(v){
-  BUS.marca = v || null;
-  BUS.modelo=null; BUS_MODELOS=[]; BUS_FILTROS=[];
+  const id = v==='' ? null : Number(v);
+  BUS.marcaId = id;
+  BUS.marca = id==null ? null : (BUS_MARCAS.find(m=>m.wega_marca_id===id)||{}).marca;
+  BUS.modeloId=null; BUS.modelo=null; BUS_MODELOS=[]; BUS_FILTROS=[]; BUS_CAT=[];
   $('bres').innerHTML='';
-  if(!BUS.marca){ busResetSelect('bus-modelo','Seleccionar modelo', true); busInfo(); return; }
+  if(BUS.marcaId==null){ busResetSelect('bus-modelo','Seleccionar modelo', true); busInfo(); return; }
   await busCargarModelos(false);
   busInfo();
 }
 async function busCargarModelos(mantener){
   const s=$('bus-modelo'); if(!s) return;
   s.disabled=true; s.innerHTML='<option value="">Cargando…</option>';
-  const {data}=await sb.rpc('cat_modelos',{p_marca:BUS.marca,p_tipo:BUS.tipo});
+  const {data}=await sb.rpc('cat_wega_modelos',{p_tipo_id:BUS.tipoId,p_marca_id:BUS.marcaId});
   BUS_MODELOS=data||[];
   s.innerHTML='<option value="">Seleccionar modelo</option>'+
-    BUS_MODELOS.map(m=>`<option value="${m.modelo.replace(/"/g,'&quot;')}" ${mantener&&BUS.modelo===m.modelo?'selected':''}>${m.modelo}</option>`).join('');
+    BUS_MODELOS.map(m=>`<option value="${m.wega_modelo_id}" ${mantener&&BUS.modeloId===m.wega_modelo_id?'selected':''}>${esc(m.modelo)}</option>`).join('');
   s.disabled=false;
-  if(mantener && BUS.modelo) busBuscar();
+  if(mantener && BUS.modeloId!=null) busBuscar();
 }
 
 function busSetModelo(v){
-  BUS.modelo = v || null;
-  if(!BUS.modelo){ $('bres').innerHTML=''; busInfo(); return; }
+  const id = v==='' ? null : Number(v);
+  BUS.modeloId = id;
+  BUS.modelo = id==null ? null : (BUS_MODELOS.find(m=>m.wega_modelo_id===id)||{}).modelo;
+  if(BUS.modeloId==null){ $('bres').innerHTML=''; busInfo(); return; }
   busInfo(); busBuscar();
 }
 function busResetSelect(id, label, disable){
@@ -4396,126 +4414,164 @@ function busVista(v){
   BUS.vista=v;
   const a=$('v-ficha'), b=$('v-tabla');
   if(a&&b){ a.classList.toggle('on',v==='ficha'); b.classList.toggle('on',v==='tabla'); }
-  if(BUS.marca && BUS.modelo) busBuscar();
+  if(BUS.modeloId!=null) busRender();
 }
 function busLimpiar(){
-  BUS.tipo=null;BUS.marca=null;BUS.modelo=null;
-  BUS_MARCAS=[];BUS_MODELOS=[];BUS_FILTROS=[];
+  BUS.tipoId=null;BUS.tipo=null;BUS.marcaId=null;BUS.marca=null;BUS.modeloId=null;BUS.modelo=null;
+  BUS_MARCAS=[];BUS_MODELOS=[];BUS_FILTROS=[];BUS_CAT=[];
   formVehiculo(); $('bres').innerHTML='';
 }
 function busInfo(){
   const el=$('bus-sel'); if(!el) return;
-  if(!BUS.tipo){ el.textContent='Elegí el tipo de vehículo para empezar'; return; }
-  if(!BUS.marca){ el.textContent='Tipo: '+BUS.tipo+' — elegí una marca'; return; }
-  if(!BUS.modelo){ el.textContent=BUS.tipo+' · '+BUS.marca+' — elegí un modelo'; return; }
-  el.innerHTML=BUS.tipo+': <b style="color:var(--text)">'+BUS.marca+' · '+BUS.modelo+'</b>';
+  if(BUS.tipoId==null){ el.textContent='Elegí el tipo de vehículo para empezar'; return; }
+  if(BUS.marcaId==null){ el.textContent='Tipo: '+(BUS.tipo||'')+' — elegí una marca'; return; }
+  if(BUS.modeloId==null){ el.textContent=(BUS.tipo||'')+' · '+(BUS.marca||'')+' — elegí un modelo'; return; }
+  el.innerHTML=esc(BUS.tipo||'')+': <b style="color:var(--text)">'+esc(BUS.marca||'')+' · '+esc(BUS.modelo||'')+'</b>';
 }
 
+// Trae del espejo TODAS las filas WEGA del modelo (1 por <tr>) y las guarda SIN
+// tocar: el orden, los códigos y sus categorías vienen tal cual.
 async function busBuscar(){
-  if(!BUS.marca || !BUS.modelo) return;
-  if(BUS.vista==='tabla') return busTabla();
-  const box=$('bres'); box.innerHTML='<div class="loading">Buscando…</div>';
-  const {data,error}=await sb.rpc('cat_filtros',
-    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_motor:null,p_anio:null,p_tipo:BUS.tipo});
+  if(BUS.tipoId==null || BUS.marcaId==null || BUS.modeloId==null) return;
+  const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
+  const {data,error}=await sb.rpc('cat_wega_catalogo',
+    {p_tipo_id:BUS.tipoId,p_marca_id:BUS.marcaId,p_modelo_id:BUS.modeloId});
   if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  BUS_FILTROS=data||[];
-  if(!BUS_FILTROS.length){
-    box.innerHTML='<div class="panel"><div class="empty">No hay productos cargados para ese vehículo.</div></div>'; return; }
-  const grupos={};
-  BUS_FILTROS.forEach(r=>{ (grupos[r.tipo]=grupos[r.tipo]||{o:r.orden,items:[]}).items.push(r); });
-  const ord=Object.entries(grupos).sort((a,b)=>a[1].o-b[1].o);
-  box.innerHTML=`
-    <div class="veh-card">
-      <div class="veh-card-t">Vehículo seleccionado</div>
-      <div class="veh-card-n">${BUS.marca} ${BUS.modelo}</div>
-      <div class="veh-card-s">${BUS_FILTROS.length} producto(s) aplicable(s)</div>
-      <button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar todos</button>
-    </div>`+
-    ord.map(([tipo,g])=>`
-      <div class="panel" style="margin-bottom:14px">
-        <div class="panel-head"><h3>${tipo} <span style="color:var(--muted);font-weight:400;font-size:13px">(${g.items.length})</span></h3></div>
-        <div class="filtro-list">
-        ${g.items.map(r=>`
-          <div class="filtro-row">
-            <div class="filtro-main">
-              <a class="filtro-cod" onclick="verProducto(${r.producto_id})">${r.codigo||'—'}</a>
-              <div class="filtro-desc">${r.descripcion||''}</div>
-              <div class="filtro-apl">Aplica a: ${r.aplica_a||'—'}</div>
-            </div>
-            <div class="filtro-meta">
-              ${Number(r.stock)>0?`<span class="tag ok">Stock ${Number(r.stock)}</span>`:'<span class="tag pend">Sin stock</span>'}
-              ${r.ubicacion?`<span class="filtro-ubi">${r.ubicacion}</span>`:''}
-              <span class="filtro-precio">${money(r.precio)}</span>
-              <button class="btn btn-sm" onclick='cartAdd(${JSON.stringify(r).replace(/'/g,"&#39;")})'>Agregar</button>
-            </div>
-          </div>`).join('')}
-        </div>
-      </div>`).join('');
-  renderCart();
+  BUS_CAT = data||[];
+  // Contexto por fila (para el carrito/presupuesto). Índice -> datos literales de la fila WEGA.
+  WEGA_CTX = BUS_CAT.map(r=>({
+    fila_id:r.fila_id, wega_tipo_id:r.wega_tipo_id, wega_marca_id:r.wega_marca_id,
+    wega_modelo_id:r.wega_modelo_id, fila_orden:r.fila_orden,
+    marca:r.marca, modelo:r.modelo, version:r.motor,
+    anio:r.anio_txt, anio_desde:r.anio_desde, anio_hasta:r.anio_hasta
+  }));
+  // Aplanado de códigos COMERCIALES para "Agregar todos" (los técnicos no se agregan).
+  BUS_FILTROS=[];
+  BUS_CAT.forEach((r,ci)=>{ (r.codigos||[]).forEach(c=>{ if(c.es_comercial && c.producto_id){
+    BUS_FILTROS.push({producto_id:c.producto_id,codigo:c.codigo,descripcion:c.nombre||'',precio:c.precio,stock:c.stock, _ci:ci});
+  }});});
+  busRender();
 }
 
-// ---- TABLA DE APLICACIONES (vista principal) ----
-// Una fila = una aplicación vehicular, con sus propios productos.
-async function busTabla(){
-  const box=$('bres'); box.innerHTML='<div class="loading">Armando catálogo…</div>';
-  const {data,error}=await sb.rpc('cat_tabla',
-    {p_marca:BUS.marca,p_modelo:BUS.modelo,p_tipo:BUS.tipo,p_anio:null});
-  if(error){ box.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  if(!data||!data.length){
-    box.innerHTML='<div class="panel"><div class="empty">No hay aplicaciones cargadas para ese vehículo.</div></div>'; return; }
-
-  // Registro de contexto por fila (aplicación Wega). El onclick transporta
-  // sólo el índice numérico -> el contexto viaja como dato, no como texto DOM.
-  WEGA_CTX = data.map(r=>({
-    marca: BUS.marca, modelo: r.modelo, version: r.motor,
-    anio: r.anio, anio_desde: r.anio_desde, anio_hasta: r.anio_hasta
+// Deriva las categorías VISIBLES y su orden exclusivamente de los datos (categoria +
+// col_orden). Si mañana WEGA agrega una categoría, aparece sola, sin tocar código.
+function busCategoriasDinamicas(){
+  const minCol={};   // categoria -> menor col_orden observado (define el orden de columnas)
+  BUS_CAT.forEach(r=>(r.codigos||[]).forEach(c=>{
+    const k=c.categoria==null?'':c.categoria;
+    if(!(k in minCol) || c.col_orden<minCol[k]) minCol[k]=c.col_orden;
   }));
-  // celda: varios códigos, uno debajo del otro, clickeables. ci = índice de fila.
-  const cel=(v,ci)=>!v ? '<span class="cat-vacio">—</span>'
-    : v.split('\n').map(c=>`<a class="filtro-cod" onclick="verProductoPorCodigo('${c.replace(/'/g,"\\'")}',${ci})">${c}</a>`).join('<br>');
-  const totalProd=data.reduce((s,r)=>s+(Number(r.total)||0),0);
+  return Object.keys(minCol).sort((a,b)=> (minCol[a]-minCol[b]) || a.localeCompare(b));
+}
+
+function busRender(){
+  if(!BUS_CAT.length){
+    $('bres').innerHTML='<div class="panel"><div class="empty">No hay filas de catálogo para ese vehículo.</div></div>'; return; }
+  if(BUS.vista==='ficha') return busFicha();
+  return busTabla();
+}
+
+// ---- TABLA (vista principal): columnas dinámicas, 1 renglón por fila WEGA ----
+function busTabla(){
+  const box=$('bres');
+  const cats = busCategoriasDinamicas();
+  const totalCods = BUS_CAT.reduce((s,r)=>s+((r.codigos||[]).length),0);
+
+  // Celda de una categoría para una fila: los códigos de ESA fila en ESA categoría,
+  // en su orden (cod_orden). Comerciales clickeables a producto; técnicos atenuados.
+  const celda=(r,cat,ci)=>{
+    const items=(r.codigos||[]).filter(c=>(c.categoria==null?'':c.categoria)===cat)
+                               .sort((a,b)=>a.cod_orden-b.cod_orden);
+    if(!items.length) return '<span class="cat-vacio">—</span>';
+    return items.map(c=>codigoLink(c,ci)).join('<br>');
+  };
 
   box.innerHTML=`
     <div class="veh-card">
       <div class="veh-card-t">Vehículo seleccionado</div>
-      <div class="veh-card-n">${BUS.marca} — ${BUS.modelo}</div>
-      <div class="veh-card-s">${data.length} aplicación(es) · ${totalProd} producto(s)</div>
+      <div class="veh-card-n">${esc(BUS.marca||'')} — ${esc(BUS.modelo||'')}</div>
+      <div class="veh-card-s">${BUS_CAT.length} fila(s) WEGA · ${totalCods} código(s)</div>
+      ${BUS_FILTROS.length?`<button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar comerciales</button>`:''}
     </div>
     <div class="panel">
       <div class="tabla-wrap">
         <table class="cat-tabla">
           <thead><tr>
             <th>Modelo</th><th>Motor / versión</th><th>Año</th>
-            <th>Aire</th><th>Aceite</th><th>Combustible</th><th>Habitáculo</th>
-            <th>Caja</th><th>Kits</th><th>Accesorios</th><th>Otros</th>
+            ${cats.map(c=>`<th>${esc(c||'—')}</th>`).join('')}
           </tr></thead>
-          <tbody>${data.map((r,i)=>`<tr>
-            <td data-l="Modelo"><b>${r.modelo||'—'}</b></td>
-            <td data-l="Motor / versión" class="cat-motor">${r.motor||'—'}</td>
-            <td data-l="Año" class="cat-anio">${r.anio||'—'}</td>
-            <td data-l="Aire">${cel(r.aire,i)}</td>
-            <td data-l="Aceite">${cel(r.aceite,i)}</td>
-            <td data-l="Combustible">${cel(r.combustible,i)}</td>
-            <td data-l="Habitáculo">${cel(r.habitaculo,i)}</td>
-            <td data-l="Caja">${cel(r.caja,i)}</td>
-            <td data-l="Kits">${cel(r.kits,i)}</td>
-            <td data-l="Accesorios">${cel(r.accesorios,i)}</td>
-            <td data-l="Otros">${cel(r.otros,i)}</td>
+          <tbody>${BUS_CAT.map((r,i)=>`<tr data-fila="${r.fila_id}">
+            <td data-l="Modelo"><b>${esc(r.modelo||'—')}</b></td>
+            <td data-l="Motor / versión" class="cat-motor">${esc(r.motor||'—')}</td>
+            <td data-l="Año" class="cat-anio">${esc(r.anio_txt||'—')}</td>
+            ${cats.map(c=>`<td data-l="${esc(c||'—')}">${celda(r,c,i)}</td>`).join('')}
           </tr>`).join('')}</tbody>
         </table>
       </div>
     </div>
     <div style="color:var(--muted);font-size:12px;margin-top:10px">
-      Cada fila es una aplicación distinta y conserva sus propios productos.
-      Tocá un código para ver el producto y agregarlo a la venta.
+      Cada fila es una fila del catálogo WEGA y se muestra por separado aunque Modelo+Motor+Año
+      coincidan con otra. Los códigos atenuados existen en WEGA pero no están cargados como
+      producto en Lubrimax (sin precio/stock).
     </div>`;
   renderCart();
 }
 
-// ---- detalle de producto ----
-// ctx (opcional): contexto Wega de la fila desde la que se llegó. Se guarda en
-// WEGA_CTX_ACTUAL para que el botón "Agregar" lo transporte al CART sin meter
-// un objeto dentro del onclick.
+// ---- FICHA: agrupa por categoría (del espejo), incluye técnicos, no fusiona filas ----
+function busFicha(){
+  const box=$('bres');
+  const cats = busCategoriasDinamicas();
+  // Para cada categoría, listar sus códigos conservando a qué fila WEGA pertenecen.
+  const bloque = cats.map(cat=>{
+    const filasConCat = BUS_CAT.map((r,ci)=>({r,ci,
+        items:(r.codigos||[]).filter(c=>(c.categoria==null?'':c.categoria)===cat).sort((a,b)=>a.cod_orden-b.cod_orden)}))
+      .filter(x=>x.items.length);
+    if(!filasConCat.length) return '';
+    const nCod=filasConCat.reduce((s,x)=>s+x.items.length,0);
+    return `<div class="panel" style="margin-bottom:14px">
+      <div class="panel-head"><h3>${esc(cat||'—')} <span style="color:var(--muted);font-weight:400;font-size:13px">(${nCod})</span></h3></div>
+      <div class="filtro-list">
+      ${filasConCat.map(({r,ci,items})=>items.map(c=>`
+        <div class="filtro-row ${c.es_comercial?'':'fil-sinprod'}">
+          <div class="filtro-main">
+            ${codigoLink(c,ci)}
+            <div class="filtro-desc">${esc(c.nombre||'')}</div>
+            <div class="filtro-apl">Aplica a: ${esc(r.motor||'—')} · ${esc(r.anio_txt||'—')}</div>
+          </div>
+          <div class="filtro-meta">
+            ${c.es_comercial
+              ? (Number(c.stock)>0?`<span class="tag ok">Stock ${Number(c.stock)}</span>`:'<span class="tag pend">Sin stock</span>')
+              : '<span class="tag warn">No comercializado</span>'}
+            ${c.ubicacion?`<span class="filtro-ubi">${esc(c.ubicacion)}</span>`:''}
+            ${c.es_comercial?`<span class="filtro-precio">${money(c.precio)}</span>
+              <button class="btn btn-sm" onclick='cartAdd(${JSON.stringify({producto_id:c.producto_id,codigo:c.codigo,descripcion:c.nombre,precio:c.precio,stock:c.stock}).replace(/'/g,"&#39;")}, WEGA_CTX[${ci}])'>Agregar</button>`:''}
+          </div>
+        </div>`).join('')).join('')}
+      </div></div>`;
+  }).join('');
+
+  box.innerHTML=`
+    <div class="veh-card">
+      <div class="veh-card-t">Vehículo seleccionado</div>
+      <div class="veh-card-n">${esc(BUS.marca||'')} — ${esc(BUS.modelo||'')}</div>
+      <div class="veh-card-s">${BUS_CAT.length} fila(s) WEGA</div>
+      ${BUS_FILTROS.length?`<button class="btn btn-sm" onclick="cartAddTodos()">+ Agregar comerciales</button>`:''}
+    </div>${bloque}`;
+  renderCart();
+}
+
+// Link de un código del espejo. Comercial -> ver producto (precio/stock/equivalencias).
+// Técnico (producto_id NULL) -> modal informativo "No cargado en catálogo Lubrimax".
+function codigoLink(c, ci){
+  const cls = 'filtro-cod' + (c.es_comercial?'':' fil-sinprod');
+  if(c.es_comercial && c.producto_id){
+    return `<a class="${cls}" onclick="verProducto(${c.producto_id}, WEGA_CTX[${ci}])">${esc(c.codigo)}</a>`;
+  }
+  return `<a class="${cls}" title="Código WEGA no comercializado" onclick="verCodigoTecnico('${escJs(c.codigo)}')">${esc(c.codigo)}</a>`;
+}
+
+// ---- detalle de producto (comercial) ----
+// ctx (opcional): contexto de la fila WEGA de origen, para el carrito/presupuesto.
 async function verProducto(id, ctx){
   const {data:p}=await sb.from('productos')
     .select('id,codigo,nombre,descripcion,precio_venta,stock,stock_minimo,unidad,ubicacion,tipo_filtro_id').eq('id',id).single();
@@ -4523,32 +4579,37 @@ async function verProducto(id, ctx){
   WEGA_CTX_ACTUAL = ctx || null;
   const {data:eq}=await sb.from('equivalencias').select('marca_id,codigo').eq('producto_id',id).limit(20);
   openModal(p.codigo||'Producto',`
-    <div style="font-size:15px;font-weight:600;margin-bottom:10px">${p.nombre||''}</div>
-    ${p.descripcion?`<div style="color:var(--muted);font-size:13px;margin-bottom:12px">${p.descripcion}</div>`:''}
+    <div style="font-size:15px;font-weight:600;margin-bottom:10px">${esc(p.nombre||'')}</div>
+    ${p.descripcion?`<div style="color:var(--muted);font-size:13px;margin-bottom:12px">${esc(p.descripcion)}</div>`:''}
     <div class="row2">
       <div class="field"><label>Precio</label><input value="${money(p.precio_venta)}" disabled></div>
-      <div class="field"><label>Stock</label><input value="${Number(p.stock)||0} ${p.unidad||''}" disabled></div>
+      <div class="field"><label>Stock</label><input value="${Number(p.stock)||0} ${esc(p.unidad||'')}" disabled></div>
     </div>
-    <div class="field"><label>Ubicación</label><input value="${p.ubicacion||'— sin asignar —'}" disabled></div>
+    <div class="field"><label>Ubicación</label><input value="${esc(p.ubicacion||'— sin asignar —')}" disabled></div>
     ${eq&&eq.length?`<div class="field"><label>Equivalencias</label>
-      <div style="font-size:12px;color:var(--muted);line-height:1.7">${eq.map(e=>e.codigo).join(' · ')}</div></div>`:''}
+      <div style="font-size:12px;color:var(--muted);line-height:1.7">${eq.map(e=>esc(e.codigo)).join(' · ')}</div></div>`:''}
   `,`<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>
      <button class="btn" onclick='cartAdd(${JSON.stringify({producto_id:p.id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio_venta,stock:p.stock}).replace(/'/g,"&#39;")}, WEGA_CTX_ACTUAL);closeModal()'>Agregar a la venta</button>`);
 }
-async function verProductoPorCodigo(cod, ci){
-  // ci: índice de fila en WEGA_CTX (opcional). Resuelve el contexto de la aplicación.
-  const ctx = (ci!=null && WEGA_CTX && WEGA_CTX[ci]) ? WEGA_CTX[ci] : null;
-  const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
-  if(data&&data[0]){ verProducto(data[0].id, ctx); return; }
-  // La aplicación existe en el catálogo pero Lubrimax no tiene el producto.
+
+// ---- código WEGA no comercializado (producto_id NULL) ----
+// No tiene precio/stock y no puede agregarse al carrito. No se crea producto.
+function verCodigoTecnico(cod){
   openModal(cod,`
     <div class="msg error" style="margin:0">No cargado en catálogo Lubrimax</div>
     <div style="font-size:13px;color:var(--muted);margin-top:12px">
-      El código <b style="color:var(--amber)">${cod}</b> corresponde a este vehículo según el
-      catálogo, pero todavía no existe como producto en Lubrimax, así que no tiene
+      El código <b style="color:var(--amber)">${esc(cod)}</b> corresponde a este vehículo según el
+      catálogo WEGA, pero todavía no existe como producto en Lubrimax, así que no tiene
       precio ni stock.<br><br>Podés cargarlo desde <b>Productos y servicios</b>.
     </div>`,
     `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>`);
+}
+// Compatibilidad: versión antigua por texto (ya no se usa desde la tabla v3).
+async function verProductoPorCodigo(cod, ci){
+  const ctx = (ci!=null && WEGA_CTX && WEGA_CTX[ci]) ? WEGA_CTX[ci] : null;
+  const {data}=await sb.from('productos').select('id').eq('codigo',cod).limit(1);
+  if(data&&data[0]){ verProducto(data[0].id, ctx); return; }
+  verCodigoTecnico(cod);
 }
 
 // ============ CARRITO ============
