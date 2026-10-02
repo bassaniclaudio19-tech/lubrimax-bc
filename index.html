@@ -294,6 +294,39 @@ select:disabled{opacity:.5}
   display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   box-shadow:0 -4px 18px rgba(0,0,0,.35);z-index:20}
 
+/* ---- Hover miniatura (tooltip de imagen _th) ---- */
+.bus-thumb-pop{position:absolute;z-index:60;display:none;background:#fff;border:1px solid var(--line);
+  border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none}
+.bus-thumb-pop img{display:block;width:150px;height:auto;border-radius:4px}
+
+/* ---- Ficha WEGA (modal xl) ---- */
+.fw-top{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:16px}
+.fw-gal-main{background:#fff;border:1px solid var(--line);border-radius:8px;height:260px;
+  display:flex;align-items:center;justify-content:center;overflow:hidden}
+.fw-gal-main img{max-width:100%;max-height:100%;object-fit:contain}
+.fw-noimg{color:var(--muted);font-size:13px}
+.fw-gal-thumbs{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.fw-thumb{width:54px;height:54px;background:#fff;border:1px solid var(--line);border-radius:6px;
+  overflow:hidden;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.fw-thumb.on{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,165,36,.3)}
+.fw-thumb img{max-width:100%;max-height:100%;object-fit:contain}
+.fw-com{background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:14px}
+.fw-tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.fw-tab{background:none;color:var(--muted);padding:9px 16px;font-weight:600;font-size:13px;
+  border-bottom:2px solid transparent;font-family:'Barlow Condensed';font-size:16px}
+.fw-tab:hover{color:var(--text)}
+.fw-tab.on{color:var(--amber);border-bottom-color:var(--amber)}
+.fw-tabbody{min-height:80px}
+.fw-empty{color:var(--muted);font-size:13px;padding:14px 0}
+.fw-eq,.fw-dim{width:100%;border-collapse:collapse;font-size:13px}
+.fw-eq td,.fw-dim td{padding:7px 10px;border-bottom:1px solid var(--line)}
+.fw-eq-marca{color:var(--muted);width:45%}
+.fw-eq-cod{font-weight:600}
+.fw-eq tr.fw-propia td{color:var(--amber)}
+.fw-dim-k{color:var(--muted);width:45%;text-transform:capitalize}
+.fw-apl{margin:0;padding-left:18px;font-size:13px;line-height:1.9;columns:2}
+@media(max-width:760px){ .fw-top{grid-template-columns:1fr} .fw-apl{columns:1} }
+
 @media(max-width:860px){
   .bus-grid{grid-template-columns:1fr}
   .bus-grid3{grid-template-columns:1fr}
@@ -4560,17 +4593,155 @@ function busFicha(){
   renderCart();
 }
 
-// Link de un código del espejo. Comercial -> ver producto (precio/stock/equivalencias).
-// Técnico (producto_id NULL) -> modal informativo "No cargado en catálogo Lubrimax".
+// Link de un código del espejo. Cualquier código (comercial o técnico) abre la
+// FICHA WEGA completa (cat_wega_detalle). El hover muestra la miniatura _th si existe.
+// data-thumb lleva la URL de miniatura (del espejo) para el tooltip, sin RPC por mouseover.
 function codigoLink(c, ci){
   const cls = 'filtro-cod' + (c.es_comercial?'':' fil-sinprod');
-  if(c.es_comercial && c.producto_id){
-    return `<a class="${cls}" onclick="verProducto(${c.producto_id}, WEGA_CTX[${ci}])">${esc(c.codigo)}</a>`;
-  }
-  return `<a class="${cls}" title="Código WEGA no comercializado" onclick="verCodigoTecnico('${escJs(c.codigo)}')">${esc(c.codigo)}</a>`;
+  const thumb = c.thumb_url ? ` data-thumb="${esc(c.thumb_url)}"` : '';
+  const titulo = c.es_comercial ? '' : ' title="Código WEGA no comercializado"';
+  return `<a class="${cls}"${thumb}${titulo} onclick="verFichaWega('${escJs(c.codigo)}', ${ci})" onmouseenter="busThumbShow(this)" onmouseleave="busThumbHide()">${esc(c.codigo)}</a>`;
 }
 
-// ---- detalle de producto (comercial) ----
+// ---- Hover de miniatura (tooltip con la imagen _th) ----
+// Un único elemento flotante reutilizado; no hace consultas (usa data-thumb ya presente).
+let _busThumbEl=null;
+function busThumbShow(a){
+  const url=a.getAttribute('data-thumb'); if(!url) return;
+  if(!_busThumbEl){
+    _busThumbEl=document.createElement('div');
+    _busThumbEl.className='bus-thumb-pop';
+    document.body.appendChild(_busThumbEl);
+  }
+  _busThumbEl.innerHTML=`<img src="${url}" alt="" onerror="busThumbHide()">`;
+  const r=a.getBoundingClientRect();
+  _busThumbEl.style.left=(window.scrollX + r.left)+'px';
+  _busThumbEl.style.top=(window.scrollY + r.bottom + 6)+'px';
+  _busThumbEl.style.display='block';
+}
+function busThumbHide(){ if(_busThumbEl) _busThumbEl.style.display='none'; }
+
+// ============ FICHA WEGA COMPLETA (cat_wega_detalle) ============
+// Abre, para CUALQUIER código (comercial o técnico), una ficha dentro de Lubrimax:
+// galería de imágenes + datos comerciales (si hay producto) + pestañas
+// Dimensiones / Equivalencias / Aplicaciones. No navega a wega.com.ar.
+let FICHA_WEGA=null;          // última ficha cargada (para los tabs y el carrito)
+let FICHA_CTX=null;           // contexto de la fila WEGA de origen
+let FICHA_GAL=0;              // índice de imagen activa en la galería
+
+async function verFichaWega(codigo, ci){
+  FICHA_CTX = (ci!=null && WEGA_CTX && WEGA_CTX[ci]) ? WEGA_CTX[ci] : null;
+  openModal(codigo, '<div class="loading">Cargando ficha…</div>', '', 'xl');
+  const {data,error}=await sb.rpc('cat_wega_detalle',{p_codigo:codigo});
+  if(error){ mBody.innerHTML='<div class="msg error">'+esc(error.message)+'</div>'; return; }
+  FICHA_WEGA = data || {};
+  FICHA_GAL = 0;
+  fichaRender();
+}
+
+// URL de galería preferente: _gd, si no _mbl, si no _th (fallback determinístico).
+function fichaImgUrl(im){ return im.url_gd || im.url_mbl || im.url_th || null; }
+
+function fichaRender(){
+  const f=FICHA_WEGA||{};
+  const imgs=Array.isArray(f.imagenes)?f.imagenes:[];
+  const prod=f.producto;
+  const comercial=!!f.es_comercial;
+
+  // --- galería ---
+  let galeria='';
+  if(imgs.length){
+    const actual=imgs[Math.min(FICHA_GAL,imgs.length-1)];
+    const big=fichaImgUrl(actual);
+    galeria=`
+      <div class="fw-gal">
+        <div class="fw-gal-main">${big?`<img src="${esc(big)}" alt="${esc(f.codigo||'')}" onerror="this.style.display='none'">`:'<div class="fw-noimg">sin imagen</div>'}</div>
+        ${imgs.length>1?`<div class="fw-gal-thumbs">${imgs.map((im,k)=>{
+          const t=im.url_th||im.url_mbl||fichaImgUrl(im);
+          return `<div class="fw-thumb ${k===FICHA_GAL?'on':''}" onclick="fichaGal(${k})">${t?`<img src="${esc(t)}" alt="">`:''}</div>`;
+        }).join('')}</div>`:''}
+      </div>`;
+  } else {
+    galeria=`<div class="fw-gal"><div class="fw-gal-main"><div class="fw-noimg">WEGA no tiene imagen para este código</div></div></div>`;
+  }
+
+  // --- datos comerciales / estado ---
+  let comercialBox;
+  if(comercial && prod){
+    comercialBox=`
+      <div class="fw-com">
+        <div style="font-size:15px;font-weight:600">${esc(prod.nombre||'')}</div>
+        ${prod.descripcion?`<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(prod.descripcion)}</div>`:''}
+        <div class="row2" style="margin-top:10px">
+          <div class="field" style="margin:0"><label>Precio</label><input value="${money(prod.precio)}" disabled></div>
+          <div class="field" style="margin:0"><label>Stock</label><input value="${Number(prod.stock)||0} ${esc(prod.unidad||'')}" disabled></div>
+        </div>
+        <div class="field" style="margin-top:8px"><label>Ubicación</label><input value="${esc(prod.ubicacion||'— sin asignar —')}" disabled></div>
+      </div>`;
+  } else {
+    comercialBox=`<div class="fw-com"><div class="msg error" style="margin:0">No cargado en catálogo Lubrimax</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">Este código existe en el catálogo WEGA pero no está cargado como producto en Lubrimax (sin precio/stock). Podés cargarlo desde <b>Productos y servicios</b>.</div></div>`;
+  }
+
+  // --- pestañas ---
+  const tab=FICHA_WEGA._tab||'dimensiones';
+  mBody.innerHTML=`
+    <div class="fw-top">
+      ${galeria}
+      <div class="fw-side">${comercialBox}</div>
+    </div>
+    <div class="fw-tabs">
+      <button class="fw-tab ${tab==='dimensiones'?'on':''}" onclick="fichaTab('dimensiones')">Dimensiones</button>
+      <button class="fw-tab ${tab==='equivalencias'?'on':''}" onclick="fichaTab('equivalencias')">Equivalencias</button>
+      <button class="fw-tab ${tab==='aplicaciones'?'on':''}" onclick="fichaTab('aplicaciones')">Aplicaciones</button>
+    </div>
+    <div class="fw-tabbody">${fichaTabBody(tab)}</div>`;
+
+  // --- footer: agregar al carrito solo si comercial ---
+  mFoot.innerHTML = `<button class="btn btn-ghost" onclick="closeModal()">Cerrar</button>` +
+    (comercial && prod ? `<button class="btn" onclick='fichaAgregar()'>Agregar a la venta</button>` : '');
+}
+
+function fichaGal(k){ FICHA_GAL=k; fichaRender(); }
+function fichaTab(t){ FICHA_WEGA._tab=t; fichaRender(); }
+
+function fichaTabBody(tab){
+  const f=FICHA_WEGA||{};
+  if(tab==='equivalencias'){
+    const eq=Array.isArray(f.equivalencias)?f.equivalencias:[];
+    if(!eq.length) return '<div class="fw-empty">Sin equivalencias cargadas.</div>';
+    return `<table class="fw-eq"><tbody>${eq.map(e=>`<tr class="${e.es_wega_propio?'fw-propia':''}">
+      <td class="fw-eq-marca">${esc(e.marca_equiv||'—')}</td>
+      <td class="fw-eq-cod">${esc(e.codigo_equiv||'—')}</td></tr>`).join('')}</tbody></table>`;
+  }
+  if(tab==='aplicaciones'){
+    const ap=Array.isArray(f.aplicaciones)?f.aplicaciones:[];
+    if(!ap.length) return '<div class="fw-empty">Sin aplicaciones cargadas.</div>';
+    return `<ul class="fw-apl">${ap.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>`;
+  }
+  // dimensiones
+  const d=f.dimensiones;
+  if(!d) return '<div class="fw-empty">Sin dimensiones cargadas.</div>';
+  const filas=[];
+  if(d.dim_filtro) filas.push(['Filtro', d.dim_filtro]);
+  if(d.dim_tipo) filas.push(['Tipo', d.dim_tipo]);
+  if(d.dim_alto) filas.push(['Alto', d.dim_alto]);
+  if(d.dim_diam_ext) filas.push(['Diám. ext.', d.dim_diam_ext]);
+  if(d.dim_diam_int) filas.push(['Diám. int.', d.dim_diam_int]);
+  if(d.dim_extra && typeof d.dim_extra==='object'){
+    Object.entries(d.dim_extra).forEach(([k,v])=>{ if(v!==null && String(v).trim()!=='') filas.push([k,v]); });
+  }
+  if(!filas.length) return '<div class="fw-empty">Sin dimensiones cargadas.</div>';
+  return `<table class="fw-dim"><tbody>${filas.map(([k,v])=>`<tr><td class="fw-dim-k">${esc(k)}</td><td>${esc(v)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function fichaAgregar(){
+  const p=FICHA_WEGA&&FICHA_WEGA.producto; if(!p) return;
+  cartAdd({producto_id:p.producto_id,codigo:p.codigo,descripcion:p.nombre,precio:p.precio,stock:p.stock}, FICHA_CTX);
+  closeModal();
+}
+
+// ---- detalle de producto (comercial) ---- [compat: lo usan otras pantallas, p.ej. fichas de cliente]
 // ctx (opcional): contexto de la fila WEGA de origen, para el carrito/presupuesto.
 async function verProducto(id, ctx){
   const {data:p}=await sb.from('productos')
