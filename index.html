@@ -5185,44 +5185,191 @@ async function buscarCodigo(q){
       </tr>`).join('')}</tbody></table></div>`;
 }
 
-// ----- CONFIGURACIÓN -----
+// ----- CONFIGURACIÓN → MÁRGENES Y PRECIOS -----
+// Bloque 2b: recálculo selectivo con previsualización y confirmación.
+// Reutiliza las RPC previsualizar_recalculo / aplicar_recalculo (Supabase).
+// Ámbitos: general | familia | producto. Nunca aplica sin previsualizar + confirmar.
+let MP = { ambito:'general', familias:null, margenGeneral:null, prodSel:null, preview:null };
+
 PAGES.config=async ()=>{
   loading();
-  const {data}=await sb.from('configuracion').select('*').eq('clave','margen_general').single();
-  const margen=data?data.valor:'40';
+  if(!esAdmin()){
+    content.innerHTML='<div class="panel" style="max-width:520px"><div style="padding:22px"><div class="msg error">Sólo un administrador puede administrar márgenes y precios.</div></div></div>';
+    return;
+  }
+  const [{data:cfg}, {data:fam}] = await Promise.all([
+    sb.from('configuracion').select('valor').eq('clave','margen_general').single(),
+    sb.from('familias_comerciales').select('id,nombre,margen,politica_precio,activo').order('orden')
+  ]);
+  MP.margenGeneral = cfg ? Number(cfg.valor) : 90;
+  MP.familias = (fam||[]);
+  MP.preview = null; MP.prodSel = null;
+  mpRender();
+};
+
+function mpRender(){
+  const fams = MP.familias.filter(f=>f.activo!==false);
   content.innerHTML=`
-    <div class="panel" style="max-width:520px">
-      <div class="panel-head"><h3>Margen de venta</h3></div>
+    <div class="panel" style="max-width:860px">
+      <div class="panel-head"><h3>Márgenes y precios</h3></div>
       <div style="padding:22px">
-        <p style="color:var(--muted);margin-bottom:18px;font-size:13px">
-          El precio de venta de cada producto se calcula como <b>costo + margen</b>.
-          Al guardar un nuevo margen, se recalculan los precios de venta de todo el catálogo.
+        <p style="color:var(--muted);margin-bottom:16px;font-size:13px">
+          El precio de venta se calcula como <b>costo × (1 + IVA compra) × (1 + margen)</b>.
+          Elegí el ámbito, previsualizá el antes/después y recién después confirmás. Nunca se aplica sin confirmar.
         </p>
-        <div class="field"><label>Margen general (%)</label>
-          <input id="cfg-margen" type="number" value="${margen}" min="0" step="1" style="max-width:160px">
+        <div class="field" style="max-width:420px"><label>Ámbito</label>
+          <select id="mp-ambito" onchange="mpAmbito(this.value)">
+            <option value="general" ${MP.ambito==='general'?'selected':''}>Margen general del negocio</option>
+            <option value="familia" ${MP.ambito==='familia'?'selected':''}>Una familia comercial</option>
+            <option value="producto" ${MP.ambito==='producto'?'selected':''}>Un producto</option>
+          </select>
         </div>
-        <div id="cfg-preview" style="color:var(--muted);font-size:13px;margin:8px 0 18px"></div>
-        <button class="btn" onclick="guardarMargen()">Guardar y recalcular precios</button>
-        <div id="cfg-msg" style="margin-top:14px"></div>
+        <div id="mp-selector" style="margin:4px 0 8px"></div>
+        <div class="field" style="max-width:260px">
+          <label>Margen nuevo (%) <span style="color:var(--muted);font-weight:400">— dejalo vacío para recalcular con el margen vigente</span></label>
+          <input id="mp-margen" type="number" min="0" max="500" step="0.01" placeholder="sin cambiar" style="max-width:200px">
+        </div>
+        <div style="display:flex;gap:10px;margin:14px 0 6px">
+          <button class="btn" onclick="mpPrevisualizar()">Previsualizar</button>
+          <button class="btn" id="mp-aplicar" onclick="mpAplicar()" disabled
+                  style="opacity:.5;cursor:not-allowed">Confirmar y aplicar</button>
+        </div>
+        <div id="mp-msg" style="margin-top:10px"></div>
+        <div id="mp-tabla" style="margin-top:14px"></div>
       </div>
     </div>`;
-  const inp=$('cfg-margen'), prev=$('cfg-preview');
-  const upd=()=>{ const m=Number(inp.value)||0; const ej=Math.round(14562*(1+m/100));
-    prev.innerHTML=`Ejemplo: un filtro con costo ${money(14562)} se vendería a <b style="color:var(--amber)">${money(ej)}</b>`; };
-  inp.addEventListener('input',upd); upd();
-};
-async function guardarMargen(){
-  const m=Number($('cfg-margen').value);
-  const msg=$('cfg-msg');
-  if(isNaN(m)||m<0){ msg.innerHTML='<div class="msg error">Ingresá un margen válido (0 o más).</div>'; return; }
-  msg.innerHTML='<div style="color:var(--muted);font-size:13px">Recalculando precios de todo el catálogo…</div>';
-  // guardar el margen
-  await sb.from('configuracion').update({valor:String(m),actualizado_en:new Date().toISOString()}).eq('clave','margen_general');
-  // recalcular precios: precio_venta = round(costo * (1+m/100)) para todos los productos
-  const factor=1+m/100;
-  const {error}=await sb.rpc('recalcular_precios',{factor});
-  if(error){ msg.innerHTML='<div class="msg error">'+error.message+'</div>'; return; }
-  msg.innerHTML='<div class="msg ok">Listo. Precios actualizados con un margen del '+m+'%.</div>';
+  mpSelectorRender();
+}
+
+function mpAmbito(v){ MP.ambito=v; MP.preview=null; MP.prodSel=null; mpSelectorRender(); mpResetAplicar(); $('mp-tabla').innerHTML=''; $('mp-msg').innerHTML=''; }
+
+function mpSelectorRender(){
+  const box=$('mp-selector'); if(!box) return;
+  if(MP.ambito==='familia'){
+    const fams = MP.familias.filter(f=>f.activo!==false);
+    box.innerHTML=`
+      <div class="field" style="max-width:420px"><label>Familia</label>
+        <select id="mp-familia" onchange="mpFamiliaInfo()">
+          ${fams.map(f=>`<option value="${f.id}">${f.nombre}${f.politica_precio==='precio_lista'?' (precio de lista)':''}</option>`).join('')}
+        </select>
+      </div>
+      <div id="mp-familia-info" style="color:var(--muted);font-size:12px;margin-top:4px"></div>`;
+    mpFamiliaInfo();
+  } else if(MP.ambito==='producto'){
+    box.innerHTML=`
+      <div class="field" style="max-width:420px"><label>Producto (código o nombre)</label>
+        <input id="mp-prodq" type="text" placeholder="Buscá por código o descripción…" autocomplete="off" oninput="mpBuscarProd(this.value)">
+      </div>
+      <div id="mp-prodres" style="margin-top:2px"></div>
+      <div id="mp-prodsel" style="color:var(--amber);font-size:13px;margin-top:4px"></div>`;
+  } else {
+    box.innerHTML=`<div style="color:var(--muted);font-size:12px">Margen general vigente: <b>${MP.margenGeneral}%</b>. Afecta a los productos sin familia ni margen propio.</div>`;
+  }
+}
+
+function mpFamiliaInfo(){
+  const sel=$('mp-familia'); if(!sel) return;
+  const f=MP.familias.find(x=>String(x.id)===String(sel.value));
+  const info=$('mp-familia-info');
+  if(f && info){
+    if(f.politica_precio==='precio_lista'){
+      info.innerHTML=`<span class="tag warn">precio de lista</span> Esta familia fija el precio desde el proveedor. El recálculo por margen <b>no modifica</b> sus precios.`;
+    } else {
+      info.innerHTML=`Margen de familia vigente: <b>${f.margen!=null?f.margen+'%':'hereda el general ('+MP.margenGeneral+'%)'}</b>.`;
+    }
+  }
+}
+
+let MP_T=null;
+function mpBuscarProd(q){
+  clearTimeout(MP_T);
+  MP_T=setTimeout(async ()=>{
+    const res=$('mp-prodres'); if(!res) return;
+    q=(q||'').trim();
+    if(q.length<2){ res.innerHTML=''; return; }
+    const {data}=await sb.from('productos')
+      .select('id,codigo,nombre,familia_id,costo,margen_personalizado,precio_final,precio_neto')
+      .eq('tipo','producto').or(`codigo.ilike.%${q}%,nombre.ilike.%${q}%`).limit(8);
+    if(!data||!data.length){ res.innerHTML='<div style="color:var(--muted);font-size:12px">Sin resultados.</div>'; return; }
+    res.innerHTML=`<div class="panel" style="margin:4px 0"><table class="cmp-lines"><tbody>${
+      data.map(p=>`<tr style="cursor:pointer" onclick='mpElegirProd(${JSON.stringify(p).replace(/'/g,"&#39;")})'>
+        <td><b style="color:var(--amber)">${p.codigo||''}</b> <span style="color:var(--muted);font-size:12px">${corto(p.nombre||'',48)}</span></td>
+        <td class="cmp-num">${money(p.precio_final)}</td></tr>`).join('')
+    }</tbody></table></div>`;
+  },300);
+}
+function mpElegirProd(p){
+  MP.prodSel=p; MP.preview=null; mpResetAplicar(); $('mp-tabla').innerHTML='';
+  const f=MP.familias.find(x=>String(x.id)===String(p.familia_id));
+  const margenEf = p.margen_personalizado!=null ? p.margen_personalizado+'% (propio)'
+                 : (f&&f.margen!=null ? f.margen+'% (familia '+f.nombre+')' : MP.margenGeneral+'% (general)');
+  $('mp-prodres').innerHTML='';
+  $('mp-prodsel').innerHTML=`Seleccionado: <b>${p.codigo}</b> — margen vigente ${margenEf}`;
+}
+
+function mpResetAplicar(){ const b=$('mp-aplicar'); if(b){ b.disabled=true; b.style.opacity='.5'; b.style.cursor='not-allowed'; } }
+function mpArgs(){
+  const mTxt=$('mp-margen')?$('mp-margen').value.trim():'';
+  const p_margen_nuevo = mTxt===''? null : Number(mTxt);
+  if(MP.ambito==='familia'){ const s=$('mp-familia'); return {p_familia_id:Number(s.value), p_producto_id:null, p_margen_nuevo}; }
+  if(MP.ambito==='producto'){ if(!MP.prodSel) return null; return {p_familia_id:null, p_producto_id:MP.prodSel.id, p_margen_nuevo}; }
+  return {p_familia_id:null, p_producto_id:null, p_margen_nuevo}; // general
+}
+
+async function mpPrevisualizar(){
+  const msg=$('mp-msg'); const args=mpArgs();
+  if(!args){ msg.innerHTML='<div class="msg error">Elegí un producto primero.</div>'; return; }
+  if(args.p_margen_nuevo!=null && (isNaN(args.p_margen_nuevo)||args.p_margen_nuevo<0||args.p_margen_nuevo>500)){
+    msg.innerHTML='<div class="msg error">El margen debe estar entre 0 y 500.</div>'; return; }
+  msg.innerHTML='<div style="color:var(--muted);font-size:13px">Calculando previsualización…</div>';
+  const {data,error}=await sb.rpc('previsualizar_recalculo',args);
+  if(error){ msg.innerHTML='<div class="msg error">'+error.message+'</div>'; mpResetAplicar(); return; }
+  if(!data||!data.length){ msg.innerHTML='<div class="msg">No hay productos afectados en este ámbito.</div>'; $('mp-tabla').innerHTML=''; mpResetAplicar(); return; }
+  MP.preview = data;
+  let sumAnt=0, sumNue=0, cambian=0;
+  const rows=data.map(r=>{
+    const dAnt=Number(r.precio_final_actual)||0, dNue=Number(r.precio_final_nuevo)||0;
+    sumAnt+=dAnt; sumNue+=dNue; if(dAnt!==dNue) cambian++;
+    const esLista = r.politica==='precio_lista';
+    return `<tr>
+      <td><b style="color:var(--amber)">${r.codigo}</b> <span style="color:var(--muted);font-size:12px">${corto(r.nombre||'',40)}</span>${esLista?' <span class="tag warn">precio lista</span>':''}</td>
+      <td class="cmp-num">${r.margen_actual}%${String(r.margen_actual)!==String(r.margen_nuevo)?' → <b>'+r.margen_nuevo+'%</b>':''}</td>
+      <td class="cmp-num">${money(dAnt)}</td>
+      <td class="cmp-num">${dAnt!==dNue?'<b style="color:var(--amber)">'+money(dNue)+'</b>':money(dNue)}</td>
+      <td class="cmp-num">${dNue-dAnt>=0?'+':''}${money(dNue-dAnt)}</td>
+    </tr>`;
+  }).join('');
+  $('mp-tabla').innerHTML=`
+    <div style="color:var(--muted);font-size:12px;margin-bottom:6px">${data.length} producto(s) · ${cambian} con cambio de precio · total antes ${money(sumAnt)} → después ${money(sumNue)}</div>
+    <div class="panel"><table class="cmp-lines">
+      <thead><tr><th>Producto</th><th class="cmp-num">Margen</th><th class="cmp-num">Precio actual</th><th class="cmp-num">Precio nuevo</th><th class="cmp-num">Δ</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
+  msg.innerHTML='<div class="msg ok">Previsualización lista. Revisá y confirmá para aplicar.</div>';
+  const b=$('mp-aplicar'); if(b){ b.disabled=false; b.style.opacity='1'; b.style.cursor='pointer'; }
+}
+
+async function mpAplicar(){
+  const msg=$('mp-msg'); const args=mpArgs();
+  if(!args || !MP.preview){ msg.innerHTML='<div class="msg error">Previsualizá antes de aplicar.</div>'; return; }
+  const p_esperado = MP.preview.map(r=>({id:r.id, precio_final_nuevo:r.precio_final_nuevo}));
+  msg.innerHTML='<div style="color:var(--muted);font-size:13px">Aplicando…</div>';
+  const {data,error}=await sb.rpc('aplicar_recalculo',{...args, p_esperado});
+  if(error){
+    const t=error.message||'Error';
+    if(/cambiaron desde la previsualización/i.test(t)){
+      msg.innerHTML='<div class="msg error">Los datos cambiaron desde la previsualización. Volvé a previsualizar.</div>';
+      MP.preview=null; mpResetAplicar();
+      await mpPrevisualizar();
+    } else {
+      msg.innerHTML='<div class="msg error">'+t+'</div>';
+    }
+    return;
+  }
+  msg.innerHTML='<div class="msg ok">Listo. '+(data||0)+' producto(s) actualizados.</div>';
+  MP.preview=null; mpResetAplicar();
+  // refrescar margen general / familias en memoria si cambió
+  if(MP.ambito==='general' && args.p_margen_nuevo!=null) MP.margenGeneral=args.p_margen_nuevo;
+  if(MP.ambito==='familia' && args.p_margen_nuevo!=null){ const f=MP.familias.find(x=>x.id===args.p_familia_id); if(f) f.margen=args.p_margen_nuevo; }
 }
 
 // cerrar modal al click fuera
