@@ -1042,7 +1042,7 @@ async function pysTabla(){
         ? `<button class="btn btn-sm" data-add="${p.id}" onclick='pysAdd(${JSON.stringify({
               id:p.id,codigo:p.codigo,nombre:p.nombre,tipo:p.tipo,
               precio:Number(p.precio_venta)||0,stock:Number(p.stock)||0,manual:false
-            }).replace(/'/g,"&#39;")}), this)'>Agregar</button>`
+            }).replace(/'/g,"&#39;")}, this)'>Agregar</button>`
         : `<span style="color:var(--muted);font-size:11px">${inactivo?'inactivo':'Sin precio'}</span>`;
       return `<tr>
         <td><b style="color:var(--amber)">${p.codigo||'—'}</b></td>
