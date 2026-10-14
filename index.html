@@ -3284,7 +3284,7 @@ function nvCarrito(){
                    ${l.override?'<div style="font-size:10px;color:var(--amber)">precio manual</div>':''}`
                 : `<span style="font-size:13px">${money(l.precio)}</span>`}</td>
           <td><input type="number" min="0" max="100" step="0.01" value="${d}"
-                     ${l.override?'disabled title="Precio manual activo: sin descuento de línea"':''}
+                     ${(l.override || !esAdmin())?`disabled title="${l.override?'Precio manual activo: sin descuento de línea':'Sólo un administrador puede aplicar descuentos'}"`:''}
                      onchange="nvSet(${l.producto_id},'descuento',this.value)"></td>
           <td class="cmp-num">${money(sub)}</td>
           <td><button class="cmp-delrow" onclick="nvQuitar(${l.producto_id})">×</button></td>
@@ -4983,6 +4983,7 @@ async function cpAgregarVehiculo(){
 let VR_CLI=null, VR_CAJ=null, VR_ALI=null, VR_CMP=null;
 async function ventaRapida(){
   if(!CART.length){ alert('No hay productos seleccionados.'); return; }
+  VR_DESC_GRAL = 0;   // ningún descuento se aplica automáticamente
   if(!VR_CLI){
     const [c,k,a,t]=await Promise.all([
       sb.from('clientes').select('id,nombre').order('nombre'),
@@ -5048,12 +5049,28 @@ function vrLineas(){
           <td class="cmp-num">${money(sub)}</td>
         </tr>`;
       }).join('')}</tbody></table>
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)">
-        <span>${CART.length} ítem(s)</span>
-        <span>Total estimado <b style="color:var(--amber)">${money(nvTotal())}</b></span>
-      </div>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
-    </div>`;
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)">
+        <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
+          <span style="color:var(--muted)">Precio original</span><span>${money(nvSubtotalBruto())}</span>
+        </div>
+        ${nvDescLineas()>0.004 ? `<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;color:var(--muted)"><span>Descuento por productos</span><span>- ${money(nvDescLineas())}</span></div>` : ``}
+        ${editable ? `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:8px 0 4px">
+          <span style="color:var(--muted)">Descuento general</span>
+          <span style="display:flex;align-items:center;gap:6px">
+            <input type="number" min="0" max="100" step="0.01" value="${VR_DESC_GRAL}" style="width:80px;text-align:right" onchange="vrSetDescGral(this.value)"> %
+          </span>
+        </div>
+        <div style="display:flex;gap:6px;justify-content:flex-end;margin-bottom:6px">
+          ${[0,5,10.5,15].map(p=>`<button type="button" class="btn btn-ghost" style="padding:2px 10px;font-size:12px${Number(VR_DESC_GRAL)===p?`;border-color:var(--amber);color:var(--amber)`:``}" onclick="vrDescBtn(${p})">${(''+p).replace('.',',')}%</button>`).join('')}
+        </div>` : ``}
+        ${nvDescGeneralMonto()>0.004 ? `<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px;color:var(--muted)"><span>Descuento general (${(''+VR_DESC_GRAL).replace('.',',')}%)</span><span>- ${money(nvDescGeneralMonto())}</span></div>` : ``}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--line)">
+          <span>${CART.length} ítem(s) · Total a cobrar</span>
+          <b style="color:var(--amber);font-size:18px">${money(nvTotalFinal())}</b>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">El total final lo calcula el servidor según el comprobante.</div>
+      </div>`;
 }
 
 // Edición desde el modal de Venta rápida: reutiliza el helper compartido y
@@ -5062,6 +5079,33 @@ function vrSet(id, campo, v){
   if(!cartEditarLinea(id, campo, v)) return;
   vrLineas();
 }
+
+// ===== Descuentos: resumen de importes (estimación; el total definitivo lo calcula el servidor) =====
+// Precio original: suma de precio de catálogo x cantidad, SIN ningún descuento.
+function nvSubtotalBruto(){
+  return CART.reduce((s,l)=> s + (Number(l.precio)||0)*l.cantidad, 0);
+}
+// Subtotal con descuentos de LÍNEA aplicados (equivale a nvTotal()).
+function nvSubtotalConLinea(){ return nvTotal(); }
+// Monto del descuento por productos (líneas).
+function nvDescLineas(){ return Math.max(0, nvSubtotalBruto() - nvSubtotalConLinea()); }
+// Descuento general: % sobre el subtotal YA con descuentos de línea (sucesivo, no suma %).
+function nvDescGeneralMonto(){
+  const g = Math.min(100, Math.max(0, Number(VR_DESC_GRAL)||0));
+  return nvSubtotalConLinea() * g/100;
+}
+// Total final a cobrar (estimado).
+function nvTotalFinal(){ return nvSubtotalConLinea() - nvDescGeneralMonto(); }
+// Setear el % de descuento general (manual). Lo limita a 0..100 y re-renderiza.
+function vrSetDescGral(v){
+  if(!esAdmin()){ VR_DESC_GRAL = 0; vrLineas(); return; }
+  let n = Number(String(v).replace(',','.'));
+  if(!isFinite(n)) n = 0;
+  VR_DESC_GRAL = Math.min(100, Math.max(0, n));
+  vrLineas();
+}
+// Botones rápidos de descuento general (0 / 5 / 10,5 / 15). Nunca se aplican solos.
+function vrDescBtn(p){ vrSetDescGral(p); }
 function vrToggle(){
   const cond=$('vr-cond'), cw=$('vr-caja-w'), f=$('vr-fact'), pw=$('vr-comp-w');
   if(cond&&cw) cw.style.display = cond.value==='contado'?'':'none';
@@ -5072,6 +5116,7 @@ function vrToggle(){
 // venta ya creada en vez de duplicarla. Se libera sólo tras éxito confirmado.
 let VR_KEY = null;
 let VR_ENVIANDO = false;
+    let VR_DESC_GRAL = 0;
 
 async function vrGuardar(){
   if(VR_ENVIANDO) return;                       // evita dos envíos en paralelo
@@ -5122,7 +5167,8 @@ async function vrGuardar(){
     p_tipo_comprobante_id: comp_id,
     p_alicuota_iva_id: alic_id,
     p_caja_id: caja_id,
-    p_notas: 'Venta rápida desde Buscador'
+    p_notas: 'Venta rápida desde Buscador',
+    p_descuento_total_pct: VR_DESC_GRAL
   });
 
   VR_ENVIANDO=false;
