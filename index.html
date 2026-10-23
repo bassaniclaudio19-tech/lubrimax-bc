@@ -630,6 +630,7 @@ const MENU = [
   {id:'compras',    label:'Compras',      ic:'▼'},
   {id:'presupuestos',label:'Presupuestos',ic:'◈'},
   {id:'ventas',     label:'Ventas',       ic:'▲'},
+  {id:'granel',     label:'Aceite a granel', ic:'◴'},
   {id:'trabajos',   label:'Trabajos',     ic:'✚'},
   {id:'cobranzas',  label:'Cobranzas',    ic:'$'},
   {id:'caja',       label:'Caja',         ic:'▦'},
@@ -772,11 +773,23 @@ function enterApp(){
 }
 
 // ============ NAVEGACION ============
+// Módulos restringidos a administrador (Márgenes/precios vive dentro de 'productos').
+const SOLO_ADMIN = new Set(['compras','productos','usuarios','config']);
+function esAdminUI(){ return !!(currentProfile && currentProfile.rol==='admin'); }
 function buildNav(){
-  nav.innerHTML = MENU.map(m=>`<div class="navlink" data-id="${m.id}" onclick="go('${m.id}')"><span class="ic">${m.ic}</span><span class="lbl">${m.label}</span></div>`).join('');
+  nav.innerHTML = MENU
+    .filter(m => !SOLO_ADMIN.has(m.id) || esAdminUI())
+    .map(m=>`<div class="navlink" data-id="${m.id}" onclick="go('${m.id}')"><span class="ic">${m.ic}</span><span class="lbl">${m.label}</span></div>`).join('');
 }
 let currentPage='panel';
 function go(id){
+  // Candado de UI: los módulos SOLO_ADMIN no se abren para no-administradores.
+  if(SOLO_ADMIN.has(id) && !esAdminUI()){
+    if(typeof content!=='undefined' && content){
+      content.innerHTML = '<div class="panel"><div class="empty">Sólo un administrador puede acceder a esta sección.</div></div>';
+    }
+    return;
+  }
   currentPage=id;
   document.querySelectorAll('.navlink').forEach(n=>n.classList.toggle('active',n.dataset.id===id));
   const m=MENU.find(x=>x.id===id);
@@ -814,10 +827,12 @@ const PAGES={};
 // ----- PANEL -----
 PAGES.panel=async ()=>{
   loading();
+  // Contar por 'id' (no por '*'): tras restringir columnas de costo a authenticated,
+  // un select('*') sobre productos da permiso denegado; 'id' es columna permitida.
   const [{count:prod},{count:cli},{count:vts},prodLow] = await Promise.all([
-    sb.from('productos').select('*',{count:'exact',head:true}),
-    sb.from('clientes').select('*',{count:'exact',head:true}),
-    sb.from('ventas').select('*',{count:'exact',head:true}),
+    sb.from('productos').select('id',{count:'exact',head:true}),
+    sb.from('clientes').select('id',{count:'exact',head:true}),
+    sb.from('ventas').select('id',{count:'exact',head:true}),
     sb.from('productos').select('codigo,nombre,stock,stock_minimo').eq('tipo','producto'),
   ]);
   const bajos=(prodLow.data||[]).filter(p=>Number(p.stock)<=Number(p.stock_minimo));
@@ -961,8 +976,10 @@ async function pysTabla(){
   const box=$('pys-tabla'); if(!box) return;
   box.innerHTML='<div class="loading">Cargando…</div>';
 
+  // El costo/margen NO se leen en la tabla (no se muestran por fila). Al editar un
+  // producto, formProducto() trae costo/margen por RPC admin (producto_costo_margen).
   let q = sb.from('productos')
-    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,tipo_filtro_id,precio_venta,precio_final,stock,stock_minimo,costo,unidad,precio_venta_sugerido,margen_personalizado,ultima_alicuota_iva,activo')
+    .select('id,codigo,nombre,tipo,categoria,subfamilia,familia_id,tipo_filtro_id,precio_venta,precio_final,stock,stock_minimo,unidad,alicuota_iva_venta_id,activo')
     .eq('tipo', PYS.tab==='servicios' ? 'servicio' : 'producto')
     .order('codigo').limit(500);
 
@@ -1127,6 +1144,19 @@ let PROD_ACTUAL = null;
 
 async function formProducto(p){
   p = p || {};
+  // Editar un producto existente: el costo/margen ya no vienen en la fila de la tabla
+  // (columnas protegidas). Se traen por RPC admin producto_costo_margen. Este módulo
+  // es admin-only, así que siempre lo llama un administrador.
+  if(p.id){
+    const {data:cm} = await sb.rpc('producto_costo_margen',{ p_producto_id: p.id });
+    const d = (cm && cm[0]) ? cm[0] : null;
+    if(d){
+      p.costo = d.costo_inicial;
+      p.margen_personalizado = d.margen_personalizado;
+      p.ultima_alicuota_iva = d.ultima_alicuota_iva;
+      p.precio_venta_sugerido = d.precio_venta_sugerido;
+    }
+  }
   PROD_ACTUAL = p;
   if(!PROD_ALIC){
     const [{data:a},{data:c}] = await Promise.all([
@@ -2337,9 +2367,11 @@ function cmpBuscarProd(uid,q){
   CMP_BUSCA_T=setTimeout(async ()=>{
     const term=q.trim();
     // 1) por código/equivalencia (RPC existente)  2) por nombre/código (tabla)
+    // El costo NO se lee directo de productos (ya no es legible por SELECT). Se trae
+    // al elegir el producto, por la RPC admin compra_costo_anterior (ver cmpElegirProd).
     const [rpc,tabla]=await Promise.all([
       sb.rpc('buscar_por_codigo',{q:term}),
-      sb.from('productos').select('id,codigo,nombre,stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva')
+      sb.from('productos').select('id,codigo,nombre,stock')
         .eq('activo',true)                                   // no ofrecer inactivos
         .or(`nombre.ilike.%${term}%,codigo.ilike.%${term}%`).limit(8)
     ]);
@@ -2347,8 +2379,7 @@ function cmpBuscarProd(uid,q){
     (rpc.data||[]).forEach(r=>{ if(r.producto_id&&!vistos.has(r.producto_id)){ vistos.add(r.producto_id);
       items.push({id:r.producto_id,codigo:r.codigo_wega,nombre:r.aplicacion||r.codigo_wega,stock:r.stock}); }});
     (tabla.data||[]).forEach(r=>{ if(!vistos.has(r.id)){ vistos.add(r.id);
-      items.push({id:r.id,codigo:r.codigo,nombre:r.nombre,stock:r.stock,
-        ucn:r.ultimo_costo_neto,ucf:r.ultimo_costo_final,ualic:r.ultima_alicuota_iva}); }});
+      items.push({id:r.id,codigo:r.codigo,nombre:r.nombre,stock:r.stock}); }});
     if(!items.length){ box.innerHTML='<div class="cmp-prodhit" style="color:var(--muted)">Sin coincidencias</div>'; box.classList.add('show'); return; }
     box.innerHTML=items.slice(0,10).map(it=>`<div class="cmp-prodhit" onclick='cmpElegirProd(${uid},${JSON.stringify(it).replace(/'/g,"&#39;")})'>
         <b>${it.codigo||'—'}</b> · ${it.nombre||''} <span style="color:var(--muted)">(stock ${Number(it.stock)||0})</span></div>`).join('');
@@ -2360,20 +2391,21 @@ async function cmpElegirProd(uid,it){
   const l=CMP_ESTADO.lineas.find(x=>x.uid===uid); if(!l) return;
   l.producto_id=it.id;
   l.texto=(it.codigo?it.codigo+' · ':'')+(it.nombre||'');
-  // si no vinieron los costos (caso RPC), traerlos
-  let ucn=it.ucn, ucf=it.ucf, ualic=it.ualic, stock=it.stock;
-  if(ucn===undefined){
-    // .eq('activo',true): si el producto está inactivo no devuelve fila y la
-    // línea queda sin vincular, en vez de entrar a la compra igual.
-    const {data}=await sb.from('productos').select('stock,ultimo_costo_neto,ultimo_costo_final,ultima_alicuota_iva,alicuota_iva_venta_id')
-      .eq('id',it.id).eq('activo',true).maybeSingle();
-    if(!data){
-      l.producto_id=null; l.texto='';
-      l.info='<span style="color:var(--danger)">Ese producto está inactivo y no puede agregarse a una compra.</span>';
-      cmpRenderLineas(); return;
-    }
-    ucn=data.ultimo_costo_neto; ucf=data.ultimo_costo_final; ualic=data.ultima_alicuota_iva; stock=data.stock;
+  // El costo anterior se trae por RPC admin (compra_costo_anterior); el stock y la
+  // alícuota de venta por SELECT (columnas no sensibles). Compras es admin-only.
+  // .eq('activo',true): si el producto está inactivo no devuelve fila y la línea
+  // queda sin vincular, en vez de entrar a la compra igual.
+  const [{data:base}, cRes] = await Promise.all([
+    sb.from('productos').select('stock,alicuota_iva_venta_id').eq('id',it.id).eq('activo',true).maybeSingle(),
+    sb.rpc('compra_costo_anterior',{ p_producto_id: it.id })
+  ]);
+  if(!base){
+    l.producto_id=null; l.texto='';
+    l.info='<span style="color:var(--danger)">Ese producto está inactivo y no puede agregarse a una compra.</span>';
+    cmpRenderLineas(); return;
   }
+  const c = (cRes && cRes.data && cRes.data[0]) ? cRes.data[0] : {};
+  let ucn=c.ultimo_costo_neto, ucf=c.ultimo_costo_final, ualic=c.ultima_alicuota_iva, stock=base.stock;
   l.info=`Stock actual: <b>${Number(stock)||0}</b> · Últ. costo neto: <b>${money(ucn||0)}</b> · Últ. costo final: <b>${money(ucf||0)}</b> · Alíc. habitual: <b>${ualic||0}%</b>`;
   // proponer costo y alícuota habituales si están vacíos
   if((!l.costo||Number(l.costo)===0) && ucn) l.costo=ucn;
@@ -2472,7 +2504,8 @@ async function cmpVer(id){
   await cmpCargarCatalogos();
   const [{data:c},{data:items}]=await Promise.all([
     sb.from('compras').select('*').eq('id',id).single(),
-    sb.from('compra_items').select('*').eq('compra_id',id)
+    // columnas explícitas (sin costo_unitario/neto_unitario: ocultas a authenticated por seguridad)
+    sb.from('compra_items').select('id,compra_id,producto_id,cantidad,subtotal,alicuota_iva_id,alicuota_iva,neto_subtotal,iva_monto').eq('compra_id',id)
   ]);
   if(!c) return;
   const prov=CMP_CACHE_PROV.find(p=>p.id===c.proveedor_id);
@@ -3123,6 +3156,7 @@ function nuevaVenta(){
           <input id="nv-q" placeholder="Código, nombre o código de proveedor…"
                  value="${NV_Q.replace(/"/g,'&quot;')}" oninput="nvBuscar(this.value)" autofocus>
         </div>
+        <div style="margin-top:10px"><button class="btn" onclick="vlAbrir()">◴ Vender aceite a granel</button></div>
         <div id="nv-res" style="margin-top:12px"></div>
       </div>
     </div>
@@ -5248,7 +5282,8 @@ PAGES.config=async ()=>{
   }
   const [{data:cfg}, {data:fam}] = await Promise.all([
     sb.from('configuracion').select('valor').eq('clave','margen_general').single(),
-    sb.from('familias_comerciales').select('id,nombre,margen,politica_precio,activo').order('orden')
+    // 'margen' es columna restringida: se obtiene por RPC admin (familias_con_margen), no por SELECT directo
+    sb.rpc('familias_con_margen')
   ]);
   MP.margenGeneral = cfg ? Number(cfg.valor) : 90;
   MP.familias = (fam||[]);
@@ -5336,8 +5371,9 @@ function mpBuscarProd(q){
     const res=$('mp-prodres'); if(!res) return;
     q=(q||'').trim();
     if(q.length<2){ res.innerHTML=''; return; }
+    // Sin columnas de costo (protegidas): el costo/margen se traen por RPC al elegir.
     const {data}=await sb.from('productos')
-      .select('id,codigo,nombre,familia_id,costo,margen_personalizado,precio_final,precio_neto')
+      .select('id,codigo,nombre,familia_id,precio_final,precio_neto')
       .eq('tipo','producto').or(`codigo.ilike.%${q}%,nombre.ilike.%${q}%`).limit(8);
     if(!data||!data.length){ res.innerHTML='<div style="color:var(--muted);font-size:12px">Sin resultados.</div>'; return; }
     res.innerHTML=`<div class="panel" style="margin:4px 0"><table class="cmp-lines"><tbody>${
@@ -5347,7 +5383,13 @@ function mpBuscarProd(q){
     }</tbody></table></div>`;
   },300);
 }
-function mpElegirProd(p){
+async function mpElegirProd(p){
+  // Traer costo/margen por RPC admin (ya no vienen en la búsqueda).
+  if(p && p.id){
+    const {data:cm} = await sb.rpc('producto_costo_margen',{ p_producto_id: p.id });
+    const d = (cm && cm[0]) ? cm[0] : null;
+    if(d){ p.costo = d.costo_inicial; p.margen_personalizado = d.margen_personalizado; }
+  }
   MP.prodSel=p; MP.preview=null; mpResetAplicar(); $('mp-tabla').innerHTML='';
   const f=MP.familias.find(x=>String(x.id)===String(p.familia_id));
   const margenEf = p.margen_personalizado!=null ? p.margen_personalizado+'% (propio)'
@@ -5420,6 +5462,476 @@ async function mpAplicar(){
   if(MP.ambito==='general' && args.p_margen_nuevo!=null) MP.margenGeneral=args.p_margen_nuevo;
   if(MP.ambito==='familia' && args.p_margen_nuevo!=null){ const f=MP.familias.find(x=>x.id===args.p_familia_id); if(f) f.margen=args.p_margen_nuevo; }
 }
+
+/* ============================================================
+ * MÓDULOS ACEITE A GRANEL (integrados) — panel de tambores + venta por litros.
+ * Fuente: granel_frontend_modulo.js y granel_venta_litros_modulo.js.
+ * No modifican crear_venta. Escrituras admin-only (RPC validan rol_actual()).
+ * ============================================================ */
+/* =====================================================================
+ * MÓDULO FRONTEND — Aceite a granel (tambores) · Lubrimax BC
+ * Para integrar en index.html. Usa la misma arquitectura existente:
+ *   - MENU (sidebar), PAGES[id] (render en #content), go(id)
+ *   - cliente supabase `sb`, helpers $, money, esc, escJs, openModal, closeModal
+ * ---------------------------------------------------------------------
+ * INTEGRACIÓN (3 puntos; ver granel_frontend_integracion.md):
+ *   1) Agregar al array MENU:  {id:'granel', label:'Aceite a granel', ic:'◴'},
+ *      (recomendado: después de 'ventas' o dentro del grupo de stock)
+ *   2) Pegar este archivo COMPLETO dentro del <script> principal, junto a los
+ *      demás PAGES.* (por ejemplo, después de PAGES.stock).
+ *   3) No requiere cambios de CSS: reutiliza las clases/tokens existentes y
+ *      agrega estilos propios con prefijo .grn- vía el bloque GRN_CSS de abajo.
+ * ---------------------------------------------------------------------
+ * Permisos (según RPC ya aplicadas, v5e):
+ *   - Ingreso y ajuste: admin y empleado.
+ *   - Cambio de capacidad: SOLO admin.
+ * El rol se toma de la sesión (currentProfile.rol, igual que el resto del
+ * sistema); además la RPC valida en el backend (rol_actual()).
+ * Clases reutilizadas del index.html: .btn (secundario), .btn-primary (acción
+ * ámbar), .danger (texto de error). Para texto atenuado se usa var(--muted).
+ * ===================================================================== */
+
+// --- CSS propio (se inyecta una vez) ---
+const GRN_CSS = `
+.grn-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:14px;margin-top:6px}
+.grn-card{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:12px;cursor:pointer;transition:border-color .15s,transform .05s}
+.grn-card:hover{border-color:var(--amber);transform:translateY(-1px)}
+.grn-card .grn-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px}
+.grn-cod{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:16px;letter-spacing:.5px;color:var(--text)}
+.grn-marca{font-size:12px;color:var(--muted);line-height:1.2}
+.grn-estado{font-size:10px;font-weight:700;text-transform:uppercase;padding:2px 6px;border-radius:4px;white-space:nowrap}
+.grn-e-lleno{background:rgba(63,185,80,.15);color:var(--ok)}
+.grn-e-parcial{background:rgba(245,165,36,.15);color:var(--amber)}
+.grn-e-bajo{background:rgba(248,81,73,.15);color:var(--danger)}
+.grn-e-vacio{background:rgba(139,146,160,.15);color:var(--muted)}
+.grn-cil-wrap{display:flex;align-items:center;gap:12px}
+.grn-cil{flex:0 0 54px}
+.grn-info{flex:1;font-size:12px;line-height:1.5}
+.grn-info b{color:var(--text);font-size:15px}
+.grn-info .grn-sub{color:var(--muted)}
+.grn-pct{font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:20px}
+.grn-row{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}
+.grn-mov{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
+.grn-mov th,.grn-mov td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.grn-mov th{color:var(--muted);font-weight:600}
+.grn-ent{color:var(--ok)} .grn-sal{color:var(--danger)} .grn-aj{color:var(--amber)}
+.grn-field{margin-bottom:10px}
+.grn-field label{display:block;font-size:12px;color:var(--muted);margin-bottom:3px}
+.grn-field input,.grn-field select,.grn-field textarea{width:100%}
+.grn-help{font-size:11px;color:var(--muted);margin-top:2px}
+`;
+
+function grnInjectCss(){
+  if(document.getElementById('grn-css')) return;
+  const s=document.createElement('style'); s.id='grn-css'; s.textContent=GRN_CSS;
+  document.head.appendChild(s);
+}
+
+// --- Estado del módulo ---
+const GRN = { tambores: [], iva: [] };
+
+function grnEstado(stock, cap){
+  const pct = cap>0 ? (stock/cap)*100 : 0;
+  if(stock<=0) return {k:'vacio', lbl:'Vacío', pct:0};
+  if(pct>=90)  return {k:'lleno', lbl:'Lleno', pct};
+  if(pct<30)   return {k:'bajo',  lbl:'Bajo',  pct};
+  return {k:'parcial', lbl:'Parcial', pct};
+}
+
+// Cilindro SVG con relleno proporcional
+function grnCilindro(pct, estadoK){
+  const h=70, w=40, fillH=Math.max(0, Math.min(100,pct))/100*(h-8);
+  const y=4+(h-8-fillH);
+  const col = estadoK==='lleno'?'var(--ok)':estadoK==='bajo'?'var(--danger)':estadoK==='vacio'?'var(--muted)':'var(--amber)';
+  return `<svg class="grn-cil" viewBox="0 0 ${w} ${h+6}" width="54" height="${h+6}" aria-hidden="true">
+    <ellipse cx="${w/2}" cy="5" rx="${w/2-2}" ry="4" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+    <rect x="2" y="5" width="${w-4}" height="${h-4}" rx="3" fill="none" stroke="var(--line)" stroke-width="1.5"/>
+    <clipPath id="cc${estadoK}${Math.round(pct)}"><rect x="2.8" y="5" width="${w-5.6}" height="${h-4}" rx="3"/></clipPath>
+    <rect x="2.8" y="${y}" width="${w-5.6}" height="${fillH}" fill="${col}" opacity="0.85" clip-path="url(#cc${estadoK}${Math.round(pct)})"/>
+  </svg>`;
+}
+
+// --- Carga de datos desde Supabase ---
+async function grnCargar(){
+  // Tambores activos + datos del producto asociado (litros=stock, precio=precio_final)
+  const { data: tbs, error: e1 } = await sb
+    .from('tambores')
+    .select('id, producto_id, capacidad_litros, activo, observaciones, productos:producto_id(codigo,nombre,subfamilia,precio_final,stock,unidad)')
+    .eq('activo', true)
+    .order('id',{ascending:true});
+  if(e1){ GRN.tambores=[]; return e1; }
+  GRN.tambores = (tbs||[]).map(t=>({
+    id:t.id, producto_id:t.producto_id, cap:Number(t.capacidad_litros),
+    cod:t.productos?.codigo||'', nombre:t.productos?.nombre||'',
+    marca:t.productos?.subfamilia||'', precio:Number(t.productos?.precio_final||0),
+    stock:Number(t.productos?.stock||0), obs:t.observaciones||''
+  }));
+  if(!GRN.iva.length){
+    const { data: al } = await sb.from('alicuotas_iva').select('id,porcentaje,activo').order('id');
+    GRN.iva = al||[];
+  }
+  return null;
+}
+
+// --- Render del panel (PAGES.granel) ---
+PAGES.granel = async function(){
+  grnInjectCss();
+  const esAdmin = (currentProfile && currentProfile.rol==='admin');
+  topActions.innerHTML = `<button class="btn" onclick="grnIngresoForm()">+ Ingresar tambor</button>`;
+  content.innerHTML = `<div id="grn-cont"><div style="color:var(--muted)">Cargando tambores…</div></div>`;
+  const err = await grnCargar();
+  const cont = $('grn-cont');
+  if(err){ cont.innerHTML = `<div class="danger">Error al cargar tambores: ${esc(err.message)}</div>`; return; }
+  if(!GRN.tambores.length){
+    cont.innerHTML = `<div style="color:var(--muted);padding:20px 0">No hay tambores cargados todavía. Usá “+ Ingresar tambor”.</div>`;
+    return;
+  }
+  const cards = GRN.tambores.map(t=>{
+    const st=grnEstado(t.stock,t.cap);
+    return `<div class="grn-card" onclick="grnFicha(${t.id})">
+      <div class="grn-top">
+        <div><div class="grn-cod">${esc(t.cod)}</div><div class="grn-marca">${esc(t.marca||'')} ${esc(t.nombre||'')}</div></div>
+        <span class="grn-estado grn-e-${st.k}">${st.lbl}</span>
+      </div>
+      <div class="grn-cil-wrap">
+        ${grnCilindro(st.pct, st.k)}
+        <div class="grn-info">
+          <b>${t.stock.toLocaleString('es-AR',{maximumFractionDigits:2})} L</b> <span class="grn-sub">/ ${t.cap.toLocaleString('es-AR',{maximumFractionDigits:2})} L</span><br>
+          <span class="grn-pct" style="color:${st.k==='lleno'?'var(--ok)':st.k==='bajo'?'var(--danger)':st.k==='vacio'?'var(--muted)':'var(--amber)'}">${Math.round(st.pct)}%</span><br>
+          <span class="grn-sub">${money(t.precio)} / L</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  cont.innerHTML = `<div class="grn-grid">${cards}</div>`;
+};
+
+// --- Ficha de un tambor: historial + operaciones ---
+async function grnFicha(id){
+  const t = GRN.tambores.find(x=>x.id===id); if(!t) return;
+  const esAdmin = (currentProfile && currentProfile.rol==='admin');
+  const st = grnEstado(t.stock, t.cap);
+  // Historial de movimientos del producto del tambor
+  const { data: movs } = await sb.from('movimientos_stock')
+    .select('fecha,tipo,cantidad,motivo,origen_tipo,stock_anterior,stock_nuevo')
+    .eq('producto_id', t.producto_id).order('fecha',{ascending:false}).limit(50);
+  const filas = (movs||[]).map(m=>{
+    const f = m.fecha ? new Date(m.fecha).toLocaleString('es-AR') : '';
+    // Signo/color por la DIFERENCIA real de stock (stock_nuevo − stock_anterior), NO por
+    // cantidad: en movimientos_stock, 'cantidad' no es confiable para el signo (las salidas
+    // y algunos ajustes se guardan en magnitud absoluta). Si faltara algún stock, se cae
+    // a un signo por tipo. Así una baja siempre se ve negativa y una suba positiva.
+    const sa = (m.stock_anterior==null)?null:Number(m.stock_anterior);
+    const sn = (m.stock_nuevo==null)?null:Number(m.stock_nuevo);
+    const delta = (sa!=null && sn!=null) ? (sn - sa)
+                : (m.tipo==='salida' ? -Math.abs(Number(m.cantidad||0)) : Math.abs(Number(m.cantidad||0)));
+    const cls = delta>0 ? 'grn-ent' : delta<0 ? 'grn-sal' : 'grn-aj';
+    const signo = delta>0 ? '+' : delta<0 ? '−' : '±';
+    const tipoCls = m.tipo==='entrada'?'grn-ent':m.tipo==='salida'?'grn-sal':'grn-aj';
+    return `<tr><td>${esc(f)}</td><td class="${tipoCls}">${esc(m.tipo)}</td>
+      <td class="${cls}">${signo}${Math.abs(delta).toLocaleString('es-AR',{maximumFractionDigits:2})}</td>
+      <td>${esc(m.origen_tipo||'')}</td><td>${esc(m.motivo||'')}</td>
+      <td class="grn-sub">${Number(m.stock_anterior||0)}→${Number(m.stock_nuevo||0)}</td></tr>`;
+  }).join('') || `<tr><td colspan="6" style="color:var(--muted)">Sin movimientos.</td></tr>`;
+
+  const body = `
+    <div class="grn-cil-wrap" style="margin-bottom:12px">
+      ${grnCilindro(st.pct, st.k)}
+      <div class="grn-info">
+        <b>${esc(t.cod)}</b> — ${esc(t.marca)} ${esc(t.nombre)}<br>
+        <b>${t.stock.toLocaleString('es-AR',{maximumFractionDigits:2})} L</b> / ${t.cap.toLocaleString('es-AR',{maximumFractionDigits:2})} L
+        &nbsp;·&nbsp; <span class="grn-estado grn-e-${st.k}">${st.lbl}</span> (${Math.round(st.pct)}%)<br>
+        <span class="grn-sub">Precio: ${money(t.precio)} / L</span>
+      </div>
+    </div>
+    <div class="grn-row">
+      <button class="btn" onclick="grnAjusteForm(${t.id})">Ajustar litros</button>
+      ${esAdmin ? `<button class="btn" onclick="grnCapacidadForm(${t.id})">Cambiar capacidad</button>` : ``}
+    </div>
+    <h4 style="margin:14px 0 2px">Historial de movimientos</h4>
+    <table class="grn-mov"><thead><tr><th>Fecha</th><th>Tipo</th><th>Cant.</th><th>Origen</th><th>Motivo</th><th>Stock</th></tr></thead>
+    <tbody>${filas}</tbody></table>`;
+  openModal(`Tambor ${esc(t.cod)}`, body, `<button class="btn" onclick="closeModal()">Cerrar</button>`, 'xl');
+}
+
+// --- Form: ingreso de tambor ---
+function grnIngresoForm(){
+  const ivaOpts = GRN.iva.filter(a=>a.activo).map(a=>`<option value="${a.id}">${a.porcentaje}%</option>`).join('');
+  const body = `
+    <div class="grn-field"><label>Identificación (dejar vacío = automática TBR-####)</label><input id="grn-id" placeholder="(automática)"></div>
+    <div class="grn-field"><label>Marca</label><input id="grn-marca" placeholder="YPF, Shell…"></div>
+    <div class="grn-field"><label>Descripción / aceite</label><input id="grn-desc" placeholder="Aceite mineral"></div>
+    <div class="grn-field"><label>Viscosidad</label><input id="grn-visc" placeholder="15W40"></div>
+    <div class="grn-row">
+      <div class="grn-field" style="flex:1"><label>Capacidad (L)</label><input id="grn-cap" type="number" step="0.01" min="0.01" placeholder="200"></div>
+      <div class="grn-field" style="flex:1"><label>Litros iniciales</label><input id="grn-stk" type="number" step="0.01" min="0" placeholder="200"></div>
+    </div>
+    <div class="grn-row">
+      <div class="grn-field" style="flex:1"><label>Precio por litro (final, IVA incl.)</label><input id="grn-precio" type="number" step="0.01" min="0" placeholder="3000"></div>
+      <div class="grn-field" style="flex:1"><label>Costo por litro (neto)</label><input id="grn-costo" type="number" step="0.01" min="0" placeholder="1800"></div>
+    </div>
+    <div class="grn-row">
+      <div class="grn-field" style="flex:1"><label>IVA venta</label><select id="grn-ivav">${ivaOpts}</select></div>
+      <div class="grn-field" style="flex:1"><label>IVA compra</label><select id="grn-ivac">${ivaOpts}</select></div>
+    </div>
+    <div class="grn-field"><label>Motivo / observación</label><input id="grn-mot" placeholder="Ingreso inicial"></div>
+    <div id="grn-err" class="danger"></div>`;
+  openModal('Ingresar tambor', body,
+    `<button class="btn" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="grnIngresoGuardar()">Guardar</button>`);
+}
+
+async function grnIngresoGuardar(){
+  const errBox=$('grn-err'); errBox.textContent='';
+  const cap=parseFloat($('grn-cap').value), stk=parseFloat($('grn-stk').value);
+  const precio=parseFloat($('grn-precio').value), costo=parseFloat($('grn-costo').value);
+  if(!(cap>0)) return errBox.textContent='La capacidad debe ser mayor que cero.';
+  if(!(stk>=0)) return errBox.textContent='Los litros iniciales no pueden ser negativos.';
+  if(stk>cap) return errBox.textContent='Los litros iniciales no pueden superar la capacidad.';
+  if(!(precio>=0)) return errBox.textContent='Precio por litro inválido.';
+  if(!(costo>=0)) return errBox.textContent='Costo por litro inválido.';
+  const { data, error } = await sb.rpc('tambor_ingresar', {
+    p_identificacion: $('grn-id').value.trim() || null,
+    p_marca: $('grn-marca').value.trim() || null,
+    p_descripcion: $('grn-desc').value.trim() || null,
+    p_viscosidad: $('grn-visc').value.trim() || null,
+    p_capacidad_litros: cap,
+    p_stock_inicial: stk,
+    p_precio_litro_final: precio,
+    p_costo_litro_neto: costo,
+    p_alicuota_iva_venta_id: parseInt($('grn-ivav').value,10),
+    p_alicuota_iva_compra_id: parseInt($('grn-ivac').value,10),
+    p_motivo: $('grn-mot').value.trim() || null
+  });
+  if(error) return errBox.textContent='No se pudo ingresar: '+error.message;
+  closeModal(); go('granel');
+}
+
+// --- Form: ajuste de litros ---
+function grnAjusteForm(id){
+  const t = GRN.tambores.find(x=>x.id===id); if(!t) return;
+  const body = `
+    <p class="grn-sub">Stock actual: <b>${t.stock.toLocaleString('es-AR',{maximumFractionDigits:2})} L</b> · Capacidad: ${t.cap.toLocaleString('es-AR',{maximumFractionDigits:2})} L</p>
+    <div class="grn-field"><label>Nuevo stock (L)</label><input id="grn-aj-stk" type="number" step="0.01" min="0" max="${t.cap}" value="${t.stock}"></div>
+    <div class="grn-field"><label>Motivo (obligatorio)</label><input id="grn-aj-mot" placeholder="Corrección de inventario, merma…"></div>
+    <div id="grn-err" class="danger"></div>`;
+  openModal(`Ajustar litros — ${esc(t.cod)}`, body,
+    `<button class="btn" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="grnAjusteGuardar(${id})">Guardar ajuste</button>`);
+}
+
+async function grnAjusteGuardar(id){
+  const t = GRN.tambores.find(x=>x.id===id);
+  const errBox=$('grn-err'); errBox.textContent='';
+  const nuevo=parseFloat($('grn-aj-stk').value); const mot=$('grn-aj-mot').value.trim();
+  if(!(nuevo>=0)) return errBox.textContent='El stock no puede ser negativo.';
+  if(nuevo> t.cap) return errBox.textContent='El stock no puede superar la capacidad ('+t.cap+' L).';
+  if(!mot) return errBox.textContent='El ajuste requiere un motivo.';
+  const { error } = await sb.rpc('tambor_ajustar', { p_tambor_id:id, p_nuevo_stock:nuevo, p_motivo:mot });
+  if(error) return errBox.textContent='No se pudo ajustar: '+error.message;
+  closeModal(); go('granel');
+}
+
+// --- Form: cambio de capacidad (solo admin) ---
+function grnCapacidadForm(id){
+  if(!(currentProfile && currentProfile.rol==='admin')){ return; }  // solo admin (el backend igual valida)
+  const t = GRN.tambores.find(x=>x.id===id); if(!t) return;
+  const body = `
+    <p class="grn-sub">Capacidad actual: <b>${t.cap.toLocaleString('es-AR',{maximumFractionDigits:2})} L</b> · Stock actual: ${t.stock.toLocaleString('es-AR',{maximumFractionDigits:2})} L</p>
+    <div class="grn-field"><label>Nueva capacidad (L)</label><input id="grn-cap-new" type="number" step="0.01" min="${t.stock}" value="${t.cap}">
+      <div class="grn-help">No puede ser menor que el stock actual (${t.stock} L).</div></div>
+    <div class="grn-field"><label>Motivo (obligatorio)</label><input id="grn-cap-mot" placeholder="Cambio de envase, recalibración…"></div>
+    <div id="grn-err" class="danger"></div>`;
+  openModal(`Cambiar capacidad — ${esc(t.cod)}`, body,
+    `<button class="btn" onclick="closeModal()">Cancelar</button><button class="btn btn-primary" onclick="grnCapacidadGuardar(${id})">Guardar capacidad</button>`);
+}
+
+async function grnCapacidadGuardar(id){
+  const t = GRN.tambores.find(x=>x.id===id);
+  const errBox=$('grn-err'); errBox.textContent='';
+  const cap=parseFloat($('grn-cap-new').value); const mot=$('grn-cap-mot').value.trim();
+  if(!(cap>0)) return errBox.textContent='La capacidad debe ser mayor que cero.';
+  if(cap < t.stock) return errBox.textContent='La capacidad no puede ser menor que el stock actual ('+t.stock+' L).';
+  if(!mot) return errBox.textContent='El cambio de capacidad requiere un motivo.';
+  const { error } = await sb.rpc('tambor_set_capacidad', { p_tambor_id:id, p_nueva_capacidad:cap, p_motivo:mot });
+  if(error) return errBox.textContent='No se pudo cambiar la capacidad: '+error.message;
+  closeModal(); go('granel');
+}
+
+/* =====================================================================
+ * MÓDULO FRONTEND — Venta de aceite a granel por litros · Lubrimax BC
+ * Reparto MANUAL entre tambores, cantidades decimales, control de stock.
+ * ---------------------------------------------------------------------
+ * NO modifica crear_venta. Cada tramo del reparto se agrega al CARRITO
+ * existente (array CART) como una línea normal, con:
+ *   { producto_id: <producto del tambor>, codigo, descripcion,
+ *     precio: <precio/L del tambor>, stock: <litros disponibles>,
+ *     cantidad: <litros, decimal>, es_servicio:false, precio_manual:false,
+ *     descuento_pct:0 }
+ * Luego el flujo de Nueva Venta arma p_items y llama crear_venta igual
+ * que para cualquier producto. (Un tambor ES un producto unidad='litro'.)
+ * ---------------------------------------------------------------------
+ * INTEGRACIÓN (ver granel_integracion_index.md):
+ *   - Agregar un botón "Vender aceite a granel" en la pantalla de Nueva
+ *     Venta que llame a vlAbrir().
+ *   - Pegar este archivo dentro del <script> principal.
+ * Reutiliza: sb, $, money, esc, openModal, closeModal, CART, nvCarrito,
+ *   renderCart (todos ya existen en index.html).
+ * ===================================================================== */
+
+const VL = { tambores: [], reparto: [] };  // reparto: [{tambor_id, litros}]
+
+// Litros del producto de un tambor YA comprometidos en el CART actual (otras líneas).
+function vlEnCart(producto_id){
+  try { return (CART||[]).filter(l=>l.producto_id===producto_id)
+                         .reduce((s,l)=>s + (Number(l.cantidad)||0), 0); }
+  catch(_){ return 0; }
+}
+// Disponible real de un tambor para ESTE reparto = stock − lo ya comprometido en CART.
+function vlDisponible(t){ return Math.max(0, t.stock - vlEnCart(t.producto_id)); }
+
+async function vlCargarTambores(){
+  const { data, error } = await sb.from('tambores')
+    .select('id, producto_id, capacidad_litros, activo, productos:producto_id(codigo,nombre,subfamilia,precio_final,stock)')
+    .eq('activo', true).order('id',{ascending:true});
+  if(error){ VL.tambores=[]; return error; }
+  VL.tambores = (data||[]).map(t=>({
+    id:t.id, producto_id:t.producto_id, cap:Number(t.capacidad_litros),
+    cod:t.productos?.codigo||'', nombre:t.productos?.nombre||'', marca:t.productos?.subfamilia||'',
+    precio:Number(t.productos?.precio_final||0), stock:Number(t.productos?.stock||0)
+  })).filter(t=>t.stock>0);  // solo tambores con litros disponibles
+  return null;
+}
+
+async function vlAbrir(){
+  const err = await vlCargarTambores();
+  if(err){ openModal('Aceite a granel', `<div class="danger">No se pudieron cargar los tambores: ${esc(err.message)}</div>`,
+    `<button class="btn" onclick="closeModal()">Cerrar</button>`); return; }
+  if(!VL.tambores.length){ openModal('Aceite a granel', `<div style="color:var(--muted)">No hay tambores con stock disponible.</div>`,
+    `<button class="btn" onclick="closeModal()">Cerrar</button>`); return; }
+  VL.reparto = [];
+  vlRender();
+}
+
+function vlTotalReparto(){ return VL.reparto.reduce((s,r)=>s+(Number(r.litros)||0),0); }
+// Redondeo a 2 decimales SIN perder precisión de litros (evita 4.5 -> 4.4999…).
+function vlRound2(n){ return Math.round((Number(n)+Number.EPSILON)*100)/100; }
+
+function vlRender(){
+  const opts = VL.tambores.map(t=>{
+    const disp = vlDisponible(t);
+    return `<option value="${t.id}">${esc(t.cod)} — ${esc(t.marca)} ${esc(t.nombre)} · disp. ${disp.toLocaleString('es-AR',{maximumFractionDigits:2})} L · ${money(t.precio)}/L</option>`;
+  }).join('');
+  const filas = VL.reparto.map((r,idx)=>{
+    const t = VL.tambores.find(x=>x.id===r.tambor_id);
+    const litros = Number(r.litros)||0;
+    const disp = t ? vlDisponible(t) : 0;           // stock − lo ya comprometido en CART
+    const excede = t && litros > disp;              // tope real = disponible (no stock bruto)
+    const sub = t ? litros * t.precio : 0;
+    // El <input> NO se re-renderiza en cada tecla (eso le robaba el foco): en oninput
+    // solo actualizamos estado y recalculamos las celdas derivadas (vlRecalc). El valor
+    // se redondea a 2 decimales al salir del campo (onchange), no mientras se escribe.
+    return `<tr data-idx="${idx}">
+      <td>${t?esc(t.cod):'?'}<div style="color:var(--muted);font-size:11px">${t?esc(t.marca)+' '+esc(t.nombre):''}</div></td>
+      <td style="text-align:right;color:var(--muted)">${disp.toLocaleString('es-AR',{maximumFractionDigits:2})} L</td>
+      <td><input id="vl-in-${idx}" type="number" step="0.01" min="0" max="${disp}" value="${litros}" style="width:90px"
+            inputmode="decimal"
+            oninput="vlSetLitros(${idx}, this.value)" onchange="vlRedondear(${idx}, this.value)"
+            class="${excede?'vl-excede':''}"></td>
+      <td style="text-align:right">$/L ${money(t?t.precio:0)}</td>
+      <td id="vl-sub-${idx}" style="text-align:right">${money(sub)}</td>
+      <td><button class="btn btn-sm" onclick="vlQuitar(${idx})">✕</button></td>
+    </tr>
+    <tr id="vl-warn-${idx}" style="${excede?'':'display:none'}"><td colspan="6" class="danger" style="font-size:12px">⚠ supera lo disponible (${disp.toLocaleString('es-AR',{maximumFractionDigits:2})} L, descontando lo ya cargado en la venta)</td></tr>`;
+  }).join('');
+  const total = vlTotalReparto();
+  const totalImporte = VL.reparto.reduce((s,r)=>{ const t=VL.tambores.find(x=>x.id===r.tambor_id); return s+(Number(r.litros)||0)*(t?t.precio:0); },0);
+  const body = `
+    <p style="color:var(--muted);font-size:13px;margin:0 0 10px">Elegí tambores y repartí los litros manualmente. “Disp.” ya descuenta lo que haya en esta venta. Se agregan al carrito como líneas; el precio es el del tambor (editable luego con descuentos).</p>
+    <div class="grn-row" style="align-items:flex-end">
+      <div style="flex:1"><label style="display:block;font-size:12px;color:var(--muted)">Agregar tambor</label>
+        <select id="vl-sel">${opts}</select></div>
+      <button class="btn" onclick="vlAgregarTambor()">+ Agregar</button>
+    </div>
+    <table class="grn-mov" style="margin-top:10px"><thead><tr>
+      <th>Tambor</th><th style="text-align:right">Disp.</th><th>Litros</th><th style="text-align:right">Precio</th><th style="text-align:right">Subtotal</th><th></th>
+    </tr></thead><tbody>${filas||'<tr><td colspan="6" style="color:var(--muted)">Todavía no agregaste tambores.</td></tr>'}</tbody></table>
+    <div style="display:flex;justify-content:space-between;margin-top:10px;font-weight:600">
+      <span>Total litros: <span id="vl-tot-l">${total.toLocaleString('es-AR',{maximumFractionDigits:2})}</span> L</span>
+      <span>Importe: <span id="vl-tot-imp">${money(totalImporte)}</span></span>
+    </div>
+    <div id="vl-err" class="danger"></div>`;
+  const foot = `<button class="btn" onclick="closeModal()">Cancelar</button>
+    <button id="vl-ok" class="btn btn-primary" onclick="vlConfirmar()">Agregar al carrito</button>`;
+  openModal('Vender aceite a granel', body, foot, 'xl');
+  if(!document.getElementById('vl-css')){
+    const s=document.createElement('style'); s.id='vl-css';
+    s.textContent='.vl-excede{border-color:var(--danger)!important;color:var(--danger)}';
+    document.head.appendChild(s);
+  }
+  vlRecalc();
+}
+
+// Recalcula celdas derivadas (subtotales, totales, avisos, estado del botón) SIN
+// re-renderizar el modal, para no destruir el <input> que está en foco.
+function vlRecalc(){
+  let total=0, imp=0, hayExceso=false;
+  VL.reparto.forEach((r,idx)=>{
+    const t = VL.tambores.find(x=>x.id===r.tambor_id);
+    const litros = Number(r.litros)||0;
+    const disp = t ? vlDisponible(t) : 0;
+    const excede = t && litros > disp;
+    total += litros; imp += litros*(t?t.precio:0); if(excede) hayExceso=true;
+    const sub=$('vl-sub-'+idx); if(sub) sub.textContent = money(litros*(t?t.precio:0));
+    const warn=$('vl-warn-'+idx); if(warn) warn.style.display = excede ? '' : 'none';
+    const inp=$('vl-in-'+idx); if(inp) inp.classList.toggle('vl-excede', !!excede);
+  });
+  const tl=$('vl-tot-l'); if(tl) tl.textContent = total.toLocaleString('es-AR',{maximumFractionDigits:2});
+  const ti=$('vl-tot-imp'); if(ti) ti.textContent = money(imp);
+  const ok=$('vl-ok'); if(ok) ok.disabled = (!VL.reparto.length || hayExceso || total<=0);
+}
+
+function vlAgregarTambor(){
+  const sel = $('vl-sel'); if(!sel) return;
+  const id = parseInt(sel.value,10);
+  if(VL.reparto.some(r=>r.tambor_id===id)) return;   // no duplicar el mismo tambor
+  VL.reparto.push({ tambor_id:id, litros:0 });
+  vlRender();   // re-render completo SOLO al agregar un tambor (cambia la cantidad de filas)
+}
+// En cada tecla: guardar el valor crudo (sin redondear, para no romper "4." al tipear)
+// y recalcular derivados sin re-render. NO toca el innerHTML → el foco se mantiene.
+function vlSetLitros(idx, val){ if(VL.reparto[idx]){ VL.reparto[idx].litros = (parseFloat(val)||0); vlRecalc(); } }
+// Al salir del campo, normalizar a 2 decimales y reflejarlo en el input.
+function vlRedondear(idx, val){ if(VL.reparto[idx]){ const r=vlRound2(parseFloat(val)||0); VL.reparto[idx].litros=r; const inp=$('vl-in-'+idx); if(inp) inp.value=r; vlRecalc(); } }
+function vlQuitar(idx){ VL.reparto.splice(idx,1); vlRender(); }  // re-render: cambia filas
+
+function vlConfirmar(){
+  const errBox = $('vl-err'); if(errBox) errBox.textContent='';
+  // Validaciones finales contra el DISPONIBLE (stock − lo ya comprometido en CART).
+  for(const r of VL.reparto){
+    const t = VL.tambores.find(x=>x.id===r.tambor_id);
+    const l = vlRound2(Number(r.litros)||0);
+    if(l<=0){ if(errBox) errBox.textContent='Cada tambor del reparto debe tener litros > 0 (o quitalo).'; return; }
+    const disp = t ? vlDisponible(t) : 0;
+    if(t && l>disp){ if(errBox) errBox.textContent=`El tambor ${t.cod} no tiene ${l} L disponibles (quedan ${disp.toLocaleString('es-AR',{maximumFractionDigits:2})} L descontando lo ya cargado en la venta).`; return; }
+  }
+  // Empujar una línea de carrito por cada tambor del reparto, con litros redondeados a 2 dec.
+  for(const r of VL.reparto){
+    const t = VL.tambores.find(x=>x.id===r.tambor_id); if(!t) continue;
+    const litros = vlRound2(Number(r.litros)||0);
+    const ya = CART.find(x=>x.producto_id===t.producto_id);
+    if(ya){ ya.cantidad = vlRound2((Number(ya.cantidad)||0) + litros); }
+    else {
+      CART.push({ producto_id:t.producto_id, codigo:t.cod,
+        descripcion:`${t.marca} ${t.nombre} (granel ${t.cod})`.trim(),
+        precio:t.precio, stock:t.stock, cantidad:litros,
+        es_servicio:false, precio_manual:false, descuento_pct:0 });
+    }
+  }
+  closeModal();
+  // Refrescar el carrito con las funciones existentes del index.html.
+  if(typeof nvCarrito==='function') nvCarrito();
+  if(typeof renderCart==='function') renderCart();
+}
+
 
 // cerrar modal al click fuera
 overlay.addEventListener('click',e=>{if(e.target===overlay)closeModal();});
